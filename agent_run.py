@@ -159,6 +159,14 @@ if __name__ == "__main__":
                     departure_done = True         
                     dic_indic['v_not_found_in_last_station'] += len(required_departure)
                     # print("v_not_found_in_last_station")
+                    
+                #-------------------------------------------------------------------------------------------------------------------------------#    
+                #- Tentative de punission si v_not_found_in_last_station : ---------------------------------------------------------------------#
+                #-------------------------------------------------------------------------------------------------------------------------------#
+                    if len(required_departure) > 0:
+                        reward -= 10 * len(required_departure)
+                        print(f"Véhicules non trouvés à la dernière station. Pénalité: {-10 * len(required_departure)}")
+                #-------------------------------------------------------------------------------------------------------------------------------#    
     
                 else: # Sinon on cherche les véhicules requis
                     departure_done = False
