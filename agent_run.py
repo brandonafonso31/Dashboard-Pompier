@@ -164,8 +164,9 @@ if __name__ == "__main__":
                 #- Tentative de punission si v_not_found_in_last_station : ---------------------------------------------------------------------#
                 #-------------------------------------------------------------------------------------------------------------------------------#
                     if len(required_departure) > 0:
-                        reward -= 10 * len(required_departure)
-                        print(f"Véhicules non trouvés à la dernière station. Pénalité: {-10 * len(required_departure)}")
+                        penality = np.log(len(required_departure))
+                        reward -= penality
+                        print(f"Véhicules non trouvés à la dernière station. Pénalité: {-penality}")
                 #-------------------------------------------------------------------------------------------------------------------------------#    
     
                 else: # Sinon on cherche les véhicules requis
