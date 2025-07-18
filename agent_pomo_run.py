@@ -6,7 +6,7 @@ def run_agent(agent_id):
     """Fonction pour exécuter un agent individuel"""
     
     #print("\nBien arrivé dans la fonction run_agent !")
-    m = ['z1_sent', 'v_not_found_in_last_station', 'ff_sent', 'ff_skill_mean', 'v_degraded']
+    m = ['z1_sent', 'v_not_found_in_last_station']# , 'ff_sent', 'ff_skill_mean', 'v_degraded']
     # , 'function_not_found', 'skill_lvl', 'function_cancelled', 'cancelled', 'v_sent_full', 'v_sent', 'v1_not_sent_from_1st_station']
     suffix = "r100_cf3"
     
@@ -45,7 +45,7 @@ def run_agent(agent_id):
 if __name__ == "__main__":
     
     #print("\nBien arrivé dans agent_pomo_run !\n")
-    num_agents = 5  # Nombre d'agents POMO
+    num_agents = 2 # Nombre d'agents POMO
     print(f"Nombre d'agent = {num_agents}. on démarre le multi process ...")
     
     # Lancer les agents en parallèle
