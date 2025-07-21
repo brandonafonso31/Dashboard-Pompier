@@ -40,6 +40,7 @@ class DQN_Agent():
                  entropy_coeff,
                  update_every,
                  max_train_steps,
+                 decay_update,
                  device,
                  seed):
 
@@ -75,18 +76,15 @@ class DQN_Agent():
         self.lo = lo
         self.alpha = alpha   
         self.max_train_steps = max_train_steps # 80k for 10k resp, for lr decay
-        self.decay_update =  100 # Q updates % decay update => lr decay
+        self.decay_update =  decay_update # Q updates % decay update => lr decay
         print("lr decay:", self.lr_dec, "decay_update:", self.decay_update, "PER", self.per)
         self.grad_clip = 1 #1, 10 ?
 
 	    # Q-Network
-        if self.layer_type == "noisy":
-            self.qnetwork_local = Dueling_QNetwork(state_size, action_size,layer_size, n_steps, seed, num_layers, layer_type, use_batchnorm).to(device)
-            self.qnetwork_target = Dueling_QNetwork(state_size, action_size,layer_size, n_steps, seed, num_layers, layer_type, use_batchnorm).to(device)
-        else:
-            self.qnetwork_local = Dueling_QNetwork(state_size, action_size,layer_size, n_steps, seed, num_layers, layer_type, use_batchnorm).to(device)
-            self.qnetwork_target = Dueling_QNetwork(state_size, action_size,layer_size, n_steps, seed, num_layers, layer_type, use_batchnorm).to(device)
-            
+
+        self.qnetwork_local = Dueling_QNetwork(state_size, action_size,layer_size, n_steps, seed, num_layers, layer_type, use_batchnorm).to(device)
+        self.qnetwork_target = Dueling_QNetwork(state_size, action_size,layer_size, n_steps, seed, num_layers, layer_type, use_batchnorm).to(device)
+           
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=lr)
 
         if self.lr_dec == 0:
@@ -114,9 +112,6 @@ class DQN_Agent():
             print(inverse_m, forward_m)
             
     def step(self, state, action, reward, next_state, done):
-        
-        # state = torch.flatten(state)
-        # next_state = torch.flatten(next_state)  
 
         state = torch.from_numpy(state.flatten()).float()
         next_state = torch.from_numpy(next_state.flatten()).float()
@@ -124,8 +119,8 @@ class DQN_Agent():
         # Save experience in replay memory
 
         self.memory.add(state, action, reward, next_state, done)
-
         self.t_step += 1
+        
         if (self.t_step) % self.update_every == 0:
 
             if len(self.memory) > self.batch_size:
@@ -137,6 +132,11 @@ class DQN_Agent():
                     loss = self.learn_per(experiences)
                 self.Q_updates += 1  
                 # print("Q_updates - learn exp", self.Q_updates, flush=True)
+
+                return loss.item()
+
+        else:
+            return None
             
     def act(self, state, all_ff_waiting, eps=0., eval=False):
 
@@ -156,14 +156,8 @@ class DQN_Agent():
 
         else:
             action = random.choice(potential_actions)
-        # if all_ff_waiting:
-        #     print(potential_actions)
-        #     print(potential_skills)
-        #     print(action)
 
         skill_lvl = potential_skills[potential_actions.index(action)]
-        # if all_ff_waiting:
-        #     print("agent action", action, "skill_lvl", skill_lvl)
 
         return action, skill_lvl
     
@@ -265,6 +259,8 @@ class DQN_Agent():
             
             if (self.Q_updates % self.decay_update == 0):
     
+                print("update lr decay")
+    
                 if self.lr_dec == 0:
                     self.lr_decay_0()
                 elif self.lr_dec == 1:
@@ -273,6 +269,7 @@ class DQN_Agent():
                     self.lr_decay_2()
                 elif self.lr_dec == 3:
                     self.lr_decay_3()
+                
             # update per priorities
             self.memory.update_priorities(idx, abs(td_error.data.cpu().numpy()))
 
@@ -309,8 +306,10 @@ class FQF_Agent():
     def __init__(self,
                  state_size,
                  action_size,
-                 noisy,
+                 layer_type,
                  layer_size,
+                 num_layers,
+                 use_batchnorm,
                  n_steps,
                  batch_size,
                  buffer_size,
@@ -330,11 +329,17 @@ class FQF_Agent():
                  N,
                  entropy_coeff,
                  update_every,
+                 max_train_steps,
+                 decay_update,
                  device,
                  seed):
 
         self.state_size = state_size
         self.action_size = action_size
+        self.layer_type = layer_type
+        self.layer_size = layer_size
+        self.num_layers = num_layers
+        self.use_batchnorm = use_batchnorm
         self.seed = seed
         self.tseed = torch.manual_seed(seed)
         self.device = device
@@ -343,7 +348,7 @@ class FQF_Agent():
         self.update_every = update_every
         self.t_step = 0
         self.batch_size = batch_size
-        self.Q_updates = 1
+        self.Q_updates = 1 # to match with decay update
         self.n_steps = n_steps
         self.entropy_coeff = entropy_coeff
         self.N = N
@@ -360,15 +365,14 @@ class FQF_Agent():
         self.entropy_tau_coeff = entropy_tau_coeff
         self.lo = lo
         self.alpha = alpha   
-        self.noisy = noisy
-        self.max_train_steps = 80000 # for 10k resp
-        self.decay_update =  100
-        print("lr decay", bool(self.lr_dec), "decay_update", self.decay_update, "PER", self.per)
-        self.grad_clip = 1 #10 ?
+        self.max_train_steps = max_train_steps # 80k for 10k resp, for lr decay
+        self.decay_update =  decay_update # Q updates % decay update => lr decay
+        print("lr decay:", self.lr_dec, "decay_update:", self.decay_update, "PER", self.per)
+        self.grad_clip = 1 #1, 10 ?
 
         # FQF-Network
-        self.qnetwork_local = QVN(state_size, action_size,layer_size, n_steps, device, seed, noisy, N).to(device)
-        self.qnetwork_target = QVN(state_size, action_size,layer_size, n_steps,device, seed, noisy, N).to(device)
+        self.qnetwork_local = QVN(state_size, action_size,layer_size, n_steps, device, seed, N, num_layers, layer_type, use_batchnorm).to(device)
+        self.qnetwork_target = QVN(state_size, action_size,layer_size, n_steps,device, seed, N, num_layers, layer_type, use_batchnorm).to(device)
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=lr)
         print(self.qnetwork_local)
 
@@ -393,17 +397,16 @@ class FQF_Agent():
             self.ICM = ICM(inverse_m, forward_m).to(device)
             print(inverse_m, forward_m)
 
-
     def step(self, state, action, reward, next_state, done):
         
-        state = torch.flatten(state.cpu())
-        next_state = torch.flatten(next_state.cpu())  
+        state = torch.from_numpy(state.flatten()).float()
+        next_state = torch.from_numpy(next_state.flatten()).float() 
         
         # Save experience in replay memory
 
         self.memory.add(state, action, reward, next_state, done)
-
         self.t_step += 1
+        
         if (self.t_step) % self.update_every == 0:
 
             if len(self.memory) > self.batch_size:
@@ -415,23 +418,28 @@ class FQF_Agent():
                     loss, entropy = self.learn_per(experiences)
                 self.Q_updates += 1
 
+                return loss.item()
+
+        else:
+            return None
+
                 
     def act(self, state, all_ff_waiting, eps=0., eval=False):
 
         potential_actions, potential_skills = get_potential_actions(state, all_ff_waiting)
               
         if np.random.uniform() > eps:
-            # state = torch.from_numpy(state).float().to(self.device)
-            state = state.view(1, self.state_size)
+
+            state = torch.from_numpy(state.flatten()).float().to(self.device)
             self.qnetwork_local.eval()
             with torch.no_grad():
                 embedding = self.qnetwork_local.forward(state)
                 taus, taus_, _ = self.FPN(embedding)
                 F_Z = self.qnetwork_local.get_quantiles(state, taus_, embedding)
-                action_values = ((taus[:, 1:].unsqueeze(-1) - taus[:, :-1].unsqueeze(-1)) * F_Z).sum(1)                   
+                q = ((taus[:, 1:].unsqueeze(-1) - taus[:, :-1].unsqueeze(-1)) * F_Z).sum(1)                   
             self.qnetwork_local.train()
             
-            q_list = action_values.cpu().numpy().flatten().tolist()  
+            q_list = q.cpu().numpy().flatten().tolist()   
             action = filter_q_values(q_list, potential_actions)
 
         else:
@@ -439,15 +447,15 @@ class FQF_Agent():
 
         skill_lvl = potential_skills[potential_actions.index(action)]
 
-        return action, int(skill_lvl)
+        return action, skill_lvl
         
     def learn(self, experiences):
         
         states, actions, rewards, next_states, dones = experiences
-
-        states = torch.from_numpy(states).to(self.device)
-        next_states = torch.from_numpy(next_states).to(self.device)
-        actions = torch.LongTensor(actions).to(self.device).unsqueeze(1) 
+        
+        states = torch.FloatTensor(states).to(self.device)
+        next_states = torch.FloatTensor(np.float32(next_states)).to(self.device)
+        actions = torch.LongTensor(actions).to(self.device).unsqueeze(1)
         rewards = torch.FloatTensor(rewards).to(self.device).unsqueeze(1) 
         dones = torch.FloatTensor(dones).to(self.device).unsqueeze(1)
         
@@ -556,7 +564,8 @@ class FQF_Agent():
         self.optimizer.zero_grad()
         loss.backward()
         clip_grad_norm_(self.qnetwork_local.parameters(),1)
-        self.optimizer.step()
+        if self.lr_dec != 0:
+            self.optimizer.step()
         
 
         # Minimize standard loss
@@ -564,24 +573,32 @@ class FQF_Agent():
         # clip_grad_norm_(self.qnetwork_local.parameters(),1)
         # self.optimizer.step()
 
+
+
         # ------------------- update target network ------------------- #
         self.soft_update(self.qnetwork_local, self.qnetwork_target)
         
-        if (self.Q_updates % self.decay_update == 0) and self.lr_dec:
-            if self.lr_dec == 1:
-                self.lr_decay() 
+        if (self.Q_updates % self.decay_update == 0):
+
+            print("update lr decay")
+
+            if self.lr_dec == 0:
+                self.lr_decay_0()
+            elif self.lr_dec == 1:
+                self.lr_decay_1() 
             elif self.lr_dec == 2:
                 self.lr_decay_2()
             elif self.lr_dec == 3:
                 self.lr_decay_3()
+                
         return loss.detach().cpu().numpy(),  entropy.mean().detach().cpu().numpy(), icm_loss
 
     def learn_per(self, experiences):
 
         states, actions, rewards, next_states, dones, idx, weights = experiences
-        
-        states = torch.from_numpy(states).to(self.device)
-        next_states = torch.from_numpy(next_states).to(self.device)
+
+        states = torch.FloatTensor(states).to(self.device)
+        next_states = torch.FloatTensor(np.float32(next_states)).to(self.device)
         actions = torch.LongTensor(actions).to(self.device).unsqueeze(1)
         rewards = torch.FloatTensor(rewards).to(self.device).unsqueeze(1) 
         dones = torch.FloatTensor(dones).to(self.device).unsqueeze(1)
@@ -669,15 +686,20 @@ class FQF_Agent():
         self.optimizer.zero_grad()
         loss.backward()
         clip_grad_norm_(self.qnetwork_local.parameters(),self.grad_clip)
-        self.optimizer.step()
+        if self.lr_dec != 0:
+            self.optimizer.step()
 
         # ------------------- update target network ------------------- #
         self.soft_update(self.qnetwork_local, self.qnetwork_target)
+        
+        if (self.Q_updates % self.decay_update == 0):
 
-        if (self.Q_updates % self.decay_update == 0) and self.lr_dec:
+            print("update lr decay")
 
-            if self.lr_dec == 1:
-                self.lr_decay() 
+            if self.lr_dec == 0:
+                self.lr_decay_0()
+            elif self.lr_dec == 1:
+                self.lr_decay_1() 
             elif self.lr_dec == 2:
                 self.lr_decay_2()
             elif self.lr_dec == 3:
@@ -696,7 +718,12 @@ class FQF_Agent():
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(self.tau*local_param.data + (1.0-self.tau)*target_param.data)
 
-    def lr_decay(self):
+    def lr_decay_0(self):
+        for p in self.optimizer.param_groups:
+            lr_now = p['lr']
+        print("step", self.t_step, "current lr :", lr_now)
+        
+    def lr_decay_1(self):
         lr_now = 0.9 * self.lr * (1 - self.t_step / self.max_train_steps) + 0.1 * self.lr
         for p in self.optimizer.param_groups:
             p['lr'] = lr_now
