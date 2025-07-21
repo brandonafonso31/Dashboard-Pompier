@@ -255,7 +255,16 @@ def compute_reward(dic_indic, dic_indic_old, num_d, dic_tarif):
         dic_delta = {key:(dic_indic[key] - dic_indic_old[key]) for key in dic_indic if key not in ['VSAV_disp', 'FPT_disp', 'EPA_disp']}
 
         for m in dic_delta:
-
+            
+            try:
+                print(f"dic_delta:{dic_delta[m]}")
+            except Exception:
+                print(f"{m} not in dic_delta")
+            try:
+                print(f"dic_delta:{dic_tarif[m]}")
+            except Exception:
+                print(f"{m} not in dic_tarif")                 
+                   
             reward += dic_delta[m] * dic_tarif[m]
 
         
