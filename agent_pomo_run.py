@@ -22,7 +22,8 @@ def run_agent(metrics,agent_id):
         "--constraint_factor_veh", "3",
         "--constraint_factor_ff", "1",
         "--save_metrics_as", f"agent_pomo_metrics_{metrics}_{suffix}",
-        "--train"
+        "--train",
+        "--agent_model","dqn"
     ]
     #print(f"\nLa commande de l'agent pomo_agent_{metrics} est {cmd}\n")
     
