@@ -1,5 +1,6 @@
 Data_environment
-Data
+Data/*.csv
 __pycache__
 SVG_model
 env_pompier
+*Zone.Identifier
