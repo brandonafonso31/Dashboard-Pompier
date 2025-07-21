@@ -40,8 +40,6 @@ if __name__ == "__main__":
     plt.legend()
     plt.grid(True)
     plt.show()
-    plt.savefig("plot_test.png")
-    print("✅ Graphique enregistré dans output_plot.png")
 
     os.chdir("../")
-    print("✅ Fin du script. Tout s’est bien déroulé.")
+    print("Fin du script. Tout s’est bien déroulé.")

@@ -43,39 +43,20 @@ def run_agent(metrics,agent_id):
         print(line.strip())
 
 
-def load_agent_rewards(metrics, num_agents=2):
-    """Charge les récompenses de tous les agents depuis les fichiers .npy"""
-    all_rewards = []
-    for i in range(num_agents):
-        file_path = os.path(f"Plots/agent_metrics_{metrics[i]}_r100_cf3_train_reward_fake.npy")
-        if os.path.exists(file_path):
-            rewards = np.load(file_path)
-            all_rewards.append(rewards)
-    return np.array(all_rewards)
-
-def compute_pomo_loss(all_rewards):
-    """Calcule la loss POMO avec baseline partagée comme dans le papier"""
-    rewards_tensor = torch.tensor(all_rewards, dtype=torch.float32)
-    baseline = rewards_tensor.mean(dim=0, keepdim=True)
-    advantages = rewards_tensor - baseline
-    loss = -torch.mean(advantages * torch.log(rewards_tensor + 1e-10))
-    return loss
-
-
 if __name__ == "__main__":
     
     #print("\nBien arrivé dans agent_pomo_run !\n")
-    num_agents = 2 # Nombre d'agents POMO
-    print(f"Nombre d'agent = {num_agents}. on démarre le multi process ...")
     
     metrics = ['z1_sent', 'v_not_found_in_last_station']
     # , 'ff_sent', 'ff_skill_mean', 'v_degraded']
     # , 'function_not_found', 'skill_lvl', 'function_cancelled', 'cancelled', 'v_sent_full', 'v_sent', 'v1_not_sent_from_1st_station']
+    
+    num_agents = len(metrics) # Nombre d'agents POMO
+    print(f"Nombre d'agent = {num_agents}. on démarre le multi process ...")
+    
+
   
     tasks = [(metric, i) for i, metric in zip(range(num_agents), metrics)]
     #print(tasks)
     with multiprocessing.Pool(processes=num_agents) as pool:
         pool.starmap(run_agent, tasks)
-        
-    all_rewards = load_agent_rewards(metrics, num_agents)
-    loss = compute_pomo_loss(all_rewards)
