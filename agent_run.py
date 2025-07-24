@@ -221,6 +221,14 @@ if __name__ == "__main__":
                                 required_departure = {i + 1: [v] for i, v in enumerate(new_veh_depart)}
                                 required_departure = update_dep(required_departure)
                                 veh_depart = new_veh_depart
+
+                                if len(veh_depart) > 5:
+                                    new_veh_depart = veh_depart[5:].copy()
+                                    veh_depart = veh_depart[:5]  
+                                    required_departure = {i + 1: [v] for i, v in enumerate(veh_depart)}
+                                    following_depart = True
+                                    print("following_depart", veh_depart)
+                                
                                 new_required_departure = {}
                                 idx_role, num_d = 0, 1
                                 following_depart = False
@@ -609,20 +617,14 @@ if __name__ == "__main__":
         torch.save(agent.qnetwork_local.state_dict(), args.model_name)
         print("Agent saved as", args.model_name, flush=True)
         print()
-        os.chdir('../Plots')
-        np.save(args.save_metrics_as + "_train_reward_" + args.dataset[6:10] +".npy", reward_evo)
 
     else:
 
         os.chdir('../Plots')
-        
-        # np.save(args.save_metrics_as + "_vehicle_" + args.dataset[6:10] +".npy", vehicle_evo)
-        np.save(args.save_metrics_as + "_reward_" + args.dataset[6:10] +".npy", reward_evo)    
+           
         pickle.dump(dic_indic, open(args.save_metrics_as + ".pkl", "wb"))
     
         os.chdir('../')
 
         print("Metrics saved", flush=True)
         print()
-
-
