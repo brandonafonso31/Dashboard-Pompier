@@ -35,7 +35,6 @@ if __name__ == "__main__":
     
     parser.add_argument("--agent_id", type=int, default=0, help="ID of the agent")
     parser.add_argument("--elected_id", type=int, default=0, help="Which agent is elected to save shared state")
-    parser.add_argument("--shared_state_path", type=str, default="shared_state.pt", help="Path to shared state file")
 
 
     args = parser.parse_args()
@@ -113,7 +112,8 @@ if __name__ == "__main__":
     wandb.init(project="simu_ff", name=args.model_name, config=hyper_params)
 
 
-    if args.agent_id != args.elected_id and os.path.exists(args.shared_state_path):
+    shared_state_path = "./SVG_model/shared_state.pt"
+    if args.agent_id != args.elected_id and os.path.exists(shared_state_path):
         print(f"[Agent {args.agent_id}] Chargement de l'état partagé depuis {args.shared_state_path}")
         shared_state = torch.load(args.shared_state_path)
     
