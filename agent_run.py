@@ -115,7 +115,7 @@ if __name__ == "__main__":
 
     if os.path.exists("./shared_state_dqn.pt") and args.start != 1: # si  un état est enregistré (a été choisi aléatoirement) et on start pas depuis le début
         print(f"Agent {args.agent_id} charge shared_state_dqn.pt")
-        state = torch.load("SVG_model/shared_state_dqn.pt", weights_only=False)
+        state = torch.load("./shared_state_dqn.pt", weights_only=False)
     elected = get_current_elected(os.getcwd())
     
     # for idx, inter in tqdm(df_pc.iloc[:-20].iterrows(), total=len(df_pc.iloc[:-20])):
