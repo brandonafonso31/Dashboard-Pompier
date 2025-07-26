@@ -2,7 +2,8 @@ import json,time,os
 
 def get_metrics(cur_path):
     metrics_path = "Data/metrics.json"
-    if "SVG_model" in cur_path or "Reward_weights" in cur_path:
+    current_dir = os.path.basename(cur_path)
+    if current_dir in ["SVG_model", "Reward_weights"]:
         metrics_path = "../" + metrics_path
     
     metrics = json.load(open(metrics_path, "r"))
@@ -10,12 +11,12 @@ def get_metrics(cur_path):
 
 def get_current_elected():
     path = "../Data/shared_state.json"
-    print(os.getcwd())
+    #print(os.getcwd())
     try:
         with open(path, "r") as f:
             data = json.load(f)
         metric = data["elected"]
-        return get_metrics().index(metric)
+        return get_metrics(os.getcwd()).index(metric)
     except Exception as e:
         print("Error reading shared_state.json:", e)
         time.sleep(0.5)

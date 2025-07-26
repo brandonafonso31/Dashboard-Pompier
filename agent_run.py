@@ -17,6 +17,8 @@ from tqdm.auto import tqdm
 import wandb
 
 if __name__ == "__main__":
+    BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+    SVG_MODEL_DIR = os.path.join(BASE_DIR, "SVG_model")
 
     parser = argparse.ArgumentParser(description="Agent parameters")
     # parser.add_argument("--hyper_params", type=str, help="Agent hyper parameters")
@@ -116,6 +118,10 @@ if __name__ == "__main__":
     if args.agent_id != get_current_elected() and os.path.exists(shared_state_path):
         print(f"[Agent {args.agent_id}] Chargement de l'état partagé depuis {args.shared_state_path}")
         shared_state = torch.load(args.shared_state_path)
+    
+    if os.path.exists("SVG_model/shared_state_dqn.pt") and args.start != 1: # si  un état est enregistré (a été choisi aléatoirement) et on start pas depuis le début
+        print(f"Agent {args.agent_id} charge shared_state_dqn.pt")
+        state = torch.load("SVG_model/shared_state_dqn.pt", weights_only=False)
     
     # for idx, inter in tqdm(df_pc.iloc[:-20].iterrows(), total=len(df_pc.iloc[:-20])):
     for idx, inter in df_pc.iterrows():
@@ -621,7 +627,7 @@ if __name__ == "__main__":
         if num_inter % 200 == 0:
             elected = get_current_elected()
             if args.agent_id == elected:
-                torch.save(state, f"./SVG_model/shared_state_{args.agent_model}.pt")
+                torch.save(state, os.path.join(SVG_MODEL_DIR, f"shared_state_{args.agent_model}.pt"))
                 print(f"[Agent {args.agent_id}] Élu pour sauvegarder à step {action_num}")
 
 
