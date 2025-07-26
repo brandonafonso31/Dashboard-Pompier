@@ -7,15 +7,22 @@ import os
 import random
 import random, json, time
 from threading import Thread
+from functions_utils_pomo import *
 
 def update_elected_agent(metrics):
     shared_path="./Data/shared_state.json"
-    while True:
+    
+    elected = random.randint(0,len(metrics)-1)
+    with open(shared_path, "w") as f:
+        json.dump({"elected": metrics[elected]}, f)
+    print(f"[PARENT] Agent élu: {metrics[elected]}")
+    
+    """while True:
         time.sleep(10)  # tous les X secondes
         elected = random.randint(0,len(metrics)-1)
         with open(shared_path, "w") as f:
             json.dump({"elected": metrics[elected]}, f)
-        print(f"[PARENT] Agent élu: {metrics[elected]}")
+        print(f"[PARENT] Agent élu: {metrics[elected]}")"""
 
 def run_agent(metric, agent_id):
     """Fonction pour exécuter un agent individuel"""
@@ -30,7 +37,7 @@ def run_agent(metric, agent_id):
         "--reward_weights", f"rw_{metric}_{suffix}.json",
         "--dataset", "df_pc_real.pkl",
         "--start", "1",
-        "--end", "40",
+        "--end", "200",
         "--constraint_factor_veh", "1",
         "--constraint_factor_ff", "1",
         "--save_metrics_as", f"agent_pomo_metrics_{metric}_{suffix}",
@@ -59,8 +66,8 @@ def run_agent(metric, agent_id):
 
 
 if __name__ == "__main__":
-    metrics = ['v_degraded', 'v1_not_sent_from_s1']
-    # , 'v3_not_sent_from_s3', 'v_not_found_in_last_station', 'z1_VSAV_sent', 'rupture_ff']
+    metrics = get_metrics()
+    metrics = metrics[:2]
     
     num_agents = len(metrics)
     print(f"Nombre d'agents = {num_agents}. On démarre...")
