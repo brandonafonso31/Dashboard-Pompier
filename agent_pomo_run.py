@@ -8,6 +8,7 @@ import random
 import random, json, time
 from threading import Thread
 from functions_utils_pomo import *
+import argparse
 
 def update_elected_agent(metrics):
     shared_path="./Data/shared_state.json"
@@ -24,7 +25,7 @@ def update_elected_agent(metrics):
             json.dump({"elected": metrics[elected]}, f)
         print(f"[PARENT] Agent élu: {metrics[elected]}")"""
 
-def run_agent(metric, agent_id):
+def run_agent(metric, agent_id, start, end):
     """Fonction pour exécuter un agent individuel"""
     
     #print("\nBien arrivé dans la fonction run_agent !")
@@ -36,8 +37,8 @@ def run_agent(metric, agent_id):
         "--hyper_params", "hyper_params.json",
         "--reward_weights", f"rw_{metric}_{suffix}.json",
         "--dataset", "df_pc_real.pkl",
-        "--start", "1",
-        "--end", "200",
+        "--start", str(start),
+        "--end", str(end),
         "--constraint_factor_veh", "1",
         "--constraint_factor_ff", "1",
         "--save_metrics_as", f"agent_pomo_metrics_{metric}_{suffix}",
@@ -66,6 +67,12 @@ def run_agent(metric, agent_id):
 
 
 if __name__ == "__main__":
+    
+    parser = argparse.ArgumentParser(description="Agent parameters (start and end)")
+    parser.add_argument("--start", type=int, default=1, help="start from num_inter")
+    parser.add_argument("--end", type=int, default=40, help="end after num_inter")
+    args = parser.parse_args()
+    
     metrics = get_metrics(os.getcwd())
     metrics = metrics[:2]
     
@@ -74,6 +81,6 @@ if __name__ == "__main__":
 
     Thread(target=update_elected_agent, args=(metrics,), daemon=True).start()
     
-    tasks = [(metric, i) for i, metric in enumerate(metrics)]
+    tasks = [(metric, i, args.start, args.end) for i, metric in enumerate(metrics)]
     with multiprocessing.Pool(processes=num_agents) as pool:
         pool.starmap(run_agent, tasks)
