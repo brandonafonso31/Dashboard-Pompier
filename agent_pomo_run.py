@@ -66,7 +66,8 @@ if __name__ == "__main__":
     num_agents = len(metrics)
     print(f"Nombre d'agents = {num_agents}. On démarre...")
 
-    Thread(target=update_elected_agent, args=metrics, daemon=True).start()
+    Thread(target=update_elected_agent(metrics), daemon=True).start()
+    
     tasks = [(metric, i, num_agents) for i, metric in enumerate(metrics)]
     with multiprocessing.Pool(processes=num_agents) as pool:
         pool.starmap(run_agent, tasks)
