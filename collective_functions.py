@@ -806,3 +806,11 @@ def update_dep(required_departure):
             new_d[k] = v
     
     return new_d
+
+def get_current_elected(shared_path="shared_state.json"):
+    try:
+        with open(shared_path, "r") as f:
+            data = json.load(f)
+            return data.get("elected", -1)
+    except Exception:
+        return -1
