@@ -8,14 +8,14 @@ import random
 import random, json, time
 from threading import Thread
 
-def update_elected_agent():
+def update_elected_agent(metrics):
     shared_path="./Data/shared_state.json"
     while True:
         time.sleep(10)  # tous les X secondes
-        elected = random.choice(metrics)
+        elected = random.randint(metrics)
         with open(shared_path, "w") as f:
-            json.dump({"elected": elected}, f)
-        print(f"[PARENT] Agent élu: {elected}")
+            json.dump({"elected": metrics[elected]}, f)
+        print(f"[PARENT] Agent élu: {metrics[elected]}")
 
 def run_agent(metric, agent_id, elected_id):
     """Fonction pour exécuter un agent individuel"""
@@ -66,7 +66,7 @@ if __name__ == "__main__":
     num_agents = len(metrics)
     print(f"Nombre d'agents = {num_agents}. On démarre...")
 
-    Thread(target=update_elected_agent, daemon=True).start()
+    Thread(target=update_elected_agent, args=metrics, daemon=True).start()
     tasks = [(metric, i, num_agents) for i, metric in enumerate(metrics)]
     with multiprocessing.Pool(processes=num_agents) as pool:
         pool.starmap(run_agent, tasks)

@@ -617,7 +617,7 @@ if __name__ == "__main__":
         # if num_inter % 99 == 0:
         #     clear_output(wait=True)
 
-        if action_num % 1000 == 0:
+        if action_num % 200 == 0:
             elected = get_current_elected()
             if args.agent_id == elected:
                 torch.save(state, "shared_state.pt")

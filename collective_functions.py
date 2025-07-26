@@ -807,7 +807,7 @@ def update_dep(required_departure):
     
     return new_d
 
-def get_current_elected(shared_path="shared_state.json"):
+def get_current_elected(shared_path="./Data/shared_state.json"):
     try:
         with open(shared_path, "r") as f:
             data = json.load(f)
