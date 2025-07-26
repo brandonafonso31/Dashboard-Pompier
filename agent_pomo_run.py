@@ -66,7 +66,7 @@ def run_agent(metric, agent_id):
 
 
 if __name__ == "__main__":
-    metrics = get_metrics()
+    metrics = get_metrics(os.getcwd())
     metrics = metrics[:2]
     
     num_agents = len(metrics)
