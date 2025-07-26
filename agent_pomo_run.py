@@ -40,15 +40,18 @@ def run_agent(metric, agent_id, start, end):
         "--agent_id", str(agent_id)
     ]
     
-    file_name = f"rw_"
-    # Si déjà commencé à être entrainé: charger les rewards entrainées précédement
+    #print(start,end)
     
-    if start!=1 and os.path.exists(f"Reward_weights/rw_{model_name}_{suffix}.json"): 
-        file_name += "pomo_agent_"
-        print("Reward précédentes Chargés")
-    file_name += f"{metric}_{suffix}.json"   
+    path = f"./rw_{model_name}_{suffix}.json"
+    if start > 1 and os.path.exists(f"./Reward_weights/{path}"):
+        file_name = path
+        print(f"[INFO] Fichier de reward précédemment entraîné chargé : {file_name}")
+    else:
+        file_name = f"rw_{metric}_{suffix}.json"
+        print(f"[INFO] Fichier de reward de base chargé : {file_name}")
+
     cmd += ["--reward_weights", file_name]
-    # print(f"rw_{model_name}_{suffix}.json",os.getcwd(),os.path.exists(f"Reward_weights/rw_{model_name}_{suffix}.json"))
+    #print(path,os.getcwd(),os.path.exists(f"./Reward_weights/{path}"))
     
     process = subprocess.Popen(
         cmd,
