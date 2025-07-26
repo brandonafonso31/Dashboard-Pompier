@@ -5,8 +5,7 @@ import torch
 import numpy as np
 import os
 import random
-import random, json, time
-from threading import Thread
+import random, json
 from functions_utils_pomo import *
 import argparse
 
@@ -16,14 +15,7 @@ def update_elected_agent(metrics):
     elected = random.randint(0,len(metrics)-1)
     with open(shared_path, "w") as f:
         json.dump({"elected": metrics[elected]}, f)
-    print(f"[PARENT] Agent élu: {metrics[elected]}")
-    
-    """while True:
-        time.sleep(10)  # tous les X secondes
-        elected = random.randint(0,len(metrics)-1)
-        with open(shared_path, "w") as f:
-            json.dump({"elected": metrics[elected]}, f)
-        print(f"[PARENT] Agent élu: {metrics[elected]}")"""
+    print(f"[RANDOM] Agent élu: {metrics[elected]}")
 
 def run_agent(metric, agent_id, start, end):
     """Fonction pour exécuter un agent individuel"""
@@ -31,11 +23,11 @@ def run_agent(metric, agent_id, start, end):
     #print("\nBien arrivé dans la fonction run_agent !")
     
     suffix = "r100_cf3"
+    model_name = f"pomo_agent_{metric}"
     cmd = [
         "python3", "agent_run.py",
-        "--model_name", f"pomo_agent_{metric}",
+        "--model_name", model_name,
         "--hyper_params", "hyper_params.json",
-        "--reward_weights", f"rw_{metric}_{suffix}.json",
         "--dataset", "df_pc_real.pkl",
         "--start", str(start),
         "--end", str(end),
@@ -47,7 +39,13 @@ def run_agent(metric, agent_id, start, end):
         "--eps_start","1",
         "--agent_id", str(agent_id)
     ]
-    #print(f"\nLa commande de l'agent pomo_agent_{metrics} est {cmd}\n")
+    
+    # Si déjà commencé à être entrainé: charger les rewards entrainées précédement
+    if os.path.exists(f"rw_{model_name}_{suffix}.json"): file_name = model_name, print("Reward précédentes Chargés")
+    else: file_name = metric # Sinon charger les métriques de bases
+    cmd += ["--reward_weights", f"rw_{file_name}_{suffix}.json"]
+    
+    #print(cmd,model_name)
     
     process = subprocess.Popen(
         cmd,
@@ -79,8 +77,18 @@ if __name__ == "__main__":
     num_agents = len(metrics)
     print(f"Nombre d'agents = {num_agents}. On démarre...")
 
-    Thread(target=update_elected_agent, args=(metrics,), daemon=True).start()
+    update_elected_agent(metrics)
     
     tasks = [(metric, i, args.start, args.end) for i, metric in enumerate(metrics)]
     with multiprocessing.Pool(processes=num_agents) as pool:
         pool.starmap(run_agent, tasks)
+    
+metric_elected = metrics[get_current_elected(os.getcwd())]
+
+for metric in metrics:
+    if metric_elected != metric:
+        with open(f"./Reward_weights/rw_pomo_agent_{metric_elected}_r100_cf3.json", "r") as r:
+            reward_data = json.load(r)
+
+        with open(f"./Reward_weights/rw_pomo_agent_{metric}_r100_cf3.json", "w") as f:
+            json.dump(reward_data, f, indent=4)

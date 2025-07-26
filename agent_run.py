@@ -113,15 +113,11 @@ if __name__ == "__main__":
 
     wandb.init(project="simu_ff", name=args.model_name, config=hyper_params)
 
-
-    shared_state_path = f"./SVG_model/shared_state_{args.agent_model}.pt"
-    if args.agent_id != get_current_elected() and os.path.exists(shared_state_path):
-        print(f"[Agent {args.agent_id}] Chargement de l'état partagé depuis {args.shared_state_path}")
-        shared_state = torch.load(args.shared_state_path)
     
-    if os.path.exists("SVG_model/shared_state_dqn.pt") and args.start != 1: # si  un état est enregistré (a été choisi aléatoirement) et on start pas depuis le début
+    if os.path.exists("./shared_state_dqn.pt") and args.start != 1: # si  un état est enregistré (a été choisi aléatoirement) et on start pas depuis le début
         print(f"Agent {args.agent_id} charge shared_state_dqn.pt")
         state = torch.load("SVG_model/shared_state_dqn.pt", weights_only=False)
+    elected = get_current_elected(os.getcwd())
     
     # for idx, inter in tqdm(df_pc.iloc[:-20].iterrows(), total=len(df_pc.iloc[:-20])):
     for idx, inter in df_pc.iterrows():
@@ -625,10 +621,10 @@ if __name__ == "__main__":
 
         #print(f"action_num = {action_num}")
         if num_inter % 200 == 0:
-            elected = get_current_elected()
             if args.agent_id == elected:
                 torch.save(state, os.path.join(SVG_MODEL_DIR, f"shared_state_{args.agent_model}.pt"))
                 print(f"[Agent {args.agent_id}] Élu pour sauvegarder à step {action_num}")
+                
 
 
         if num_inter % 10000 == 0 and args.train and required_departure == {0:"RETURN"}:   
@@ -639,8 +635,10 @@ if __name__ == "__main__":
 
         os.chdir('../SVG_model')   
         torch.save(agent.qnetwork_local.state_dict(), args.model_name)
-        print("Agent saved as", args.model_name, flush=True)
-        print()
+        print("\nAgent saved as", args.model_name, flush=True)        
+        with open(f"../Reward_weights/rw_"+ args.model_name +"_r100_cf3.json", "w") as f:
+            json.dump(dic_indic, f)
+        print(f"Reward {args.model_name} updated !\n")
 
     else:
 

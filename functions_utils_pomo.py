@@ -9,9 +9,11 @@ def get_metrics(cur_path):
     metrics = json.load(open(metrics_path, "r"))
     return [i for i in metrics.values()]
 
-def get_current_elected():
-    path = "../Data/shared_state.json"
-    #print(os.getcwd())
+def get_current_elected(cur_path):
+    path = "Data/shared_state.json"
+    current_dir = os.path.basename(cur_path)
+    if current_dir in ["SVG_model", "Reward_weights"]:
+        path = "../" + path
     try:
         with open(path, "r") as f:
             data = json.load(f)
