@@ -1,4 +1,4 @@
-import json,time
+import json,time,os
 
 def get_metrics():
     metrics_path = "./Data/metrics.json"
@@ -7,6 +7,7 @@ def get_metrics():
 
 def get_current_elected():
     path = "./Data/shared_state.json"
+    print(os.getcwd())
     try:
         with open(path, "r") as f:
             data = json.load(f)
