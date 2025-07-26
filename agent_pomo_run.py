@@ -12,7 +12,7 @@ def update_elected_agent(metrics):
     shared_path="./Data/shared_state.json"
     while True:
         time.sleep(10)  # tous les X secondes
-        elected = random.randint(metrics)
+        elected = random.randint(0,len(metrics))
         with open(shared_path, "w") as f:
             json.dump({"elected": metrics[elected]}, f)
         print(f"[PARENT] Agent élu: {metrics[elected]}")
