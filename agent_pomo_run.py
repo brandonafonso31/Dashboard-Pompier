@@ -41,6 +41,7 @@ def run_agent(metric, agent_id, start, end):
     ]
     
     # Si déjà commencé à être entrainé: charger les rewards entrainées précédement
+    print(os.getcwd())
     if os.path.exists(f"rw_{model_name}_{suffix}.json"): file_name = model_name, print("Reward précédentes Chargés")
     else: file_name = metric # Sinon charger les métriques de bases
     cmd += ["--reward_weights", f"rw_{file_name}_{suffix}.json"]
