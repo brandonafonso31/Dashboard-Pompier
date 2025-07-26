@@ -1,8 +1,8 @@
 import json,time,os
 
-def get_metrics(path):
+def get_metrics(cur_path):
     metrics_path = "Data/metrics.json"
-    if "SVG_model" in path or "Reward_weights" in path:
+    if "SVG_model" in cur_path or "Reward_weights" in cur_path:
         metrics_path = "../" + metrics_path
     
     metrics = json.load(open(metrics_path, "r"))
