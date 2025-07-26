@@ -34,7 +34,6 @@ if __name__ == "__main__":
     parser.add_argument("--constraint_factor_ff", type=int, default=1, help="size of available firefighters. factor 1 is 100%, factor 3 is 33%")
     
     parser.add_argument("--agent_id", type=int, default=0, help="ID of the agent")
-    parser.add_argument("--elected_id", type=int, default=0, help="Which agent is elected to save shared state")
 
 
     args = parser.parse_args()
@@ -112,10 +111,10 @@ if __name__ == "__main__":
     wandb.init(project="simu_ff", name=args.model_name, config=hyper_params)
 
 
-    shared_state_path = "./SVG_model/shared_state.pt"
-    if args.agent_id != args.elected_id and os.path.exists(shared_state_path):
+    """shared_state_path = f"./SVG_model/shared_state_{args.agent_model}.pt"
+    if args.agent_id != get_current_elected() and os.path.exists(shared_state_path):
         print(f"[Agent {args.agent_id}] Chargement de l'état partagé depuis {args.shared_state_path}")
-        shared_state = torch.load(args.shared_state_path)
+        shared_state = torch.load(args.shared_state_path)"""
     
     # for idx, inter in tqdm(df_pc.iloc[:-20].iterrows(), total=len(df_pc.iloc[:-20])):
     for idx, inter in df_pc.iterrows():
@@ -620,7 +619,7 @@ if __name__ == "__main__":
         if action_num % 200 == 0:
             elected = get_current_elected()
             if args.agent_id == elected:
-                torch.save(state, "shared_state.pt")
+                torch.save(state, f"./SVG_model/shared_state_{args.agent_model}.pt")
                 print(f"[Agent {args.agent_id}] Élu pour sauvegarder à step {action_num}")
 
 

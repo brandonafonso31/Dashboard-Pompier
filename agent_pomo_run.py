@@ -17,7 +17,7 @@ def update_elected_agent(metrics):
             json.dump({"elected": metrics[elected]}, f)
         print(f"[PARENT] Agent élu: {metrics[elected]}")
 
-def run_agent(metric, agent_id, elected_id):
+def run_agent(metric, agent_id):
     """Fonction pour exécuter un agent individuel"""
     
     #print("\nBien arrivé dans la fonction run_agent !")
@@ -37,8 +37,7 @@ def run_agent(metric, agent_id, elected_id):
         "--train",
         "--agent_model","dqn",
         "--eps_start","1",
-        "--agent_id", str(agent_id), 
-        "--elected_id", str(elected_id)
+        "--agent_id", str(agent_id)
     ]
     #print(f"\nLa commande de l'agent pomo_agent_{metrics} est {cmd}\n")
     
@@ -68,6 +67,6 @@ if __name__ == "__main__":
 
     Thread(target=update_elected_agent, args=(metrics,), daemon=True).start()
     
-    tasks = [(metric, i, num_agents) for i, metric in enumerate(metrics)]
+    tasks = [(metric, i) for i, metric in enumerate(metrics)]
     with multiprocessing.Pool(processes=num_agents) as pool:
         pool.starmap(run_agent, tasks)
