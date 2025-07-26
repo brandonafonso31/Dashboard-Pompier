@@ -11,7 +11,7 @@ def get_current_elected():
         with open(path, "r") as f:
             data = json.load(f)
         metric = data["elected"]
-        return ['v_degraded', 'v1_not_sent_from_s1'].index(metric)
+        return get_metrics().index(metric)
     except Exception as e:
         print("Error reading shared_state.json:", e)
         time.sleep(0.5)
