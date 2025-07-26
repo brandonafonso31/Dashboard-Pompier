@@ -7,6 +7,7 @@ import os
 import json
 import pickle
 import torch
+import time
 
 def apply_logic(potential_actions, potential_skills, is_best):
 
@@ -254,17 +255,7 @@ def compute_reward(dic_indic, dic_indic_old, num_d, dic_tarif):
 
         dic_delta = {key:(dic_indic[key] - dic_indic_old[key]) for key in dic_indic if key not in ['VSAV_disp', 'FPT_disp', 'EPA_disp']}
 
-        for m in dic_delta:
-            
-            try:
-                print(f"dic_delta:{dic_delta[m]}")
-            except Exception:
-                print(f"{m} not in dic_delta")
-            try:
-                print(f"dic_delta:{dic_tarif[m]}")
-            except Exception:
-                print(f"{m} not in dic_tarif")                 
-                   
+        for m in dic_delta:                 
             reward += dic_delta[m] * dic_tarif[m]
 
         
@@ -807,10 +798,15 @@ def update_dep(required_departure):
     
     return new_d
 
-def get_current_elected(shared_path="./Data/shared_state.json"):
-    try:
-        with open(shared_path, "r") as f:
-            data = json.load(f)
-            return data.get("elected", -1)
-    except Exception:
-        return -1
+def get_current_elected():
+    path = "./Data/shared_state.json"
+    for _ in range(3):  # retry up to 3 times
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+            metric = data["elected"]
+            return ['v_degraded', 'v1_not_sent_from_s1'].index(metric)
+        except Exception as e:
+            print("Error reading shared_state.json:", e)
+            time.sleep(0.5)
+    return -1 
