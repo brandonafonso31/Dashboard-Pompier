@@ -1,0 +1,23 @@
+{
+    "v_required": 47,
+    "v_sent": 47,
+    "v_sent_full": 47,
+    "v_degraded": 0,
+    "rupture_ff": 0,
+    "function_not_found": 1,
+    "v1_not_sent_from_s1": 1,
+    "v3_not_sent_from_s3": 0,
+    "v_not_found_in_last_station": 0,
+    "ff_required": 0,
+    "ff_sent": 133,
+    "z1_VSAV_sent": 0,
+    "z1_FPT_sent": 0,
+    "z1_EPA_sent": 0,
+    "VSAV_needed": 0,
+    "FPT_needed": 0,
+    "EPA_needed": 0,
+    "VSAV_disp": 6,
+    "FPT_disp": 0,
+    "EPA_disp": 0,
+    "skill_lvl": 172.0
+}
