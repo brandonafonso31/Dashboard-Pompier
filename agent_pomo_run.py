@@ -89,20 +89,24 @@ if __name__ == "__main__":
     with multiprocessing.Pool(processes=num_agents) as pool:
         pool.starmap(run_agent, tasks)
     
-    metric_elected = metrics[get_current_elected(os.getcwd())]
-
-
-    dic = {metrics[i]:None for i in range(num_agents)}
-    for metric in metrics:
-        with open(f"./Reward_weights/rw_mean_pomo_agent_{metric}_r100_cf3.json", "r") as f:
-            dic[metric] = json.load(f)
-    
+    # Créer un dictionnaire pour stocker les récompenses
+    dic = {metric: None for metric in metrics}
     print("\nDictionnaire des rewards moyens :", dic)
-    
-    best_reward = max(dic.values())
-    metric_best = [k for k, v in dic.items() if v == best_reward]
+    # Charger les récompenses depuis les fichiers
     for metric in metrics:
-        if metric != metric_best:
-            with open(f"./Reward_weights/rw_pomo_agent_{metric_best}_r100_cf3.json", "w") as best:
-                with open(f"./Reward_weights/rw_pomo_agent_{metric}_r100_cf3.json", "w") as bad:
-                    json.dump(best,bad)
+        try:
+            with open(f"./Reward_weights/rw_mean_pomo_agent_{metric}_r100_cf3.json", "r") as f:
+                dic[metric] = json.load(f)
+        except FileNotFoundError:
+            print(f"Fichier pour {metric} non trouvé")
+            continue
+    # Trouver la meilleure récompense et l'agent correspondant
+    best_metric = max(dic.keys(), key=lambda k: dic[k] if dic[k] is not None else float('-inf'))
+    best_reward = dic[best_metric]
+    print(f"\nMeilleure récompense: {best_reward} (agent {best_metric})")
+    # Écraser tous les fichiers avec la meilleure récompense
+    for metric in metrics:
+        if metric != best_metric:
+            with open(f"./Reward_weights/rw_pomo_agent_{metric}_r100_cf3.json", "w") as f:
+                json.dump(best_reward, f)
+            print(f"Écrasé le fichier de {metric} avec la meilleure récompense")
