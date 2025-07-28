@@ -638,9 +638,9 @@ if __name__ == "__main__":
         os.chdir('../SVG_model')   
         torch.save(agent.qnetwork_local.state_dict(), args.model_name)
         print("\nAgent saved as", args.model_name, flush=True)   
-        with open(f"../Reward_weights/rw_{args.model_name}_r100_cf3.json", "w") as f:
+        with open(f"../Reward_weights/rw_{args.model_name}_{args.start}_{args.end}_r100_cf3.json", "w") as f:
             json.dump(dic_indic, f)
-        print(f"Reward : rw_{args.model_name}_r100_cf3.json - updated !\n")
+        print(f"rw_{args.model_name}_{args.start}_{args.end}_r100_cf3.json enregistré")
 
     else:
 
