@@ -644,9 +644,10 @@ if __name__ == "__main__":
             json.dump(dic_indic, f)
         print(f"rw_{args.model_name}_r100_cf3.json enregistré")
         
-        with open(f"../Reward_weights/rw_mean{args.model_name}_r100_cf3.json") as f:
+        rwd_mean = np.mean([row[1] for row in reward_evo[-100:]])
+        with open(f"../Reward_weights/rw_mean_{args.model_name}_r100_cf3.json","w") as f:
             json.dump(rwd_mean, f) 
-        print(f"rw_mean{args.model_name}_r100_cf3.json enregistré")
+        print(f"rw_mean_{args.model_name}_r100_cf3.json enregistré")
     
     else:
 
