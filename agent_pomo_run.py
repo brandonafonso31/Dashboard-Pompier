@@ -90,11 +90,3 @@ if __name__ == "__main__":
         pool.starmap(run_agent, tasks)
     
     metric_elected = metrics[get_current_elected(os.getcwd())]
-
-    for metric in metrics:
-        if metric_elected != metric:
-            with open(f"./Reward_weights/rw_pomo_agent_{metric_elected}_r100_cf3.json", "r") as r:
-                reward_data = json.load(r)
-
-            with open(f"./Reward_weights/rw_pomo_agent_{metric}_r100_cf3.json", "w") as f:
-                json.dump(reward_data, f, indent=4)
