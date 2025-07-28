@@ -88,3 +88,21 @@ if __name__ == "__main__":
     tasks = [(metric, i, args.start, args.end) for i, metric in enumerate(metrics)]
     with multiprocessing.Pool(processes=num_agents) as pool:
         pool.starmap(run_agent, tasks)
+    
+    metric_elected = metrics[get_current_elected(os.getcwd())]
+
+
+    dic = {metric[i]:None for i in range(num_agents)}
+    for metric in metrics:
+        with open(f"./Reward_weights/rw_mean_pomo_agent_{metric}_r100_cf3.json", "r") as f:
+            dic[metric] = json.load(f)
+    
+    print("\nDictionnaire des rewards moyens :", dic)
+    
+    best_reward = max(dic.values())
+    metric_best = [k for k, v in dic.items() if v == best_reward]
+    for metric in metrics:
+        if metric != metric_best:
+            with open(f"./Reward_weights/rw_pomo_agent_{metric_best}_r100_cf3.json", "w") as best:
+                with open(f"./Reward_weights/rw_pomo_agent_{metric}_r100_cf3.json", "w") as bad:
+                    json.dump(best,bad)
