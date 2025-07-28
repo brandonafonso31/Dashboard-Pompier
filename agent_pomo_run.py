@@ -92,7 +92,7 @@ if __name__ == "__main__":
     metric_elected = metrics[get_current_elected(os.getcwd())]
 
 
-    dic = {metric[i]:None for i in range(num_agents)}
+    dic = {metrics[i]:None for i in range(num_agents)}
     for metric in metrics:
         with open(f"./Reward_weights/rw_mean_pomo_agent_{metric}_r100_cf3.json", "r") as f:
             dic[metric] = json.load(f)

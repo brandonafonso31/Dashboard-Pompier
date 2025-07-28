@@ -640,13 +640,13 @@ if __name__ == "__main__":
         torch.save(agent.qnetwork_local.state_dict(), args.model_name)
         print("\nAgent saved as", args.model_name, flush=True)
            
-        with open(f"../Reward_weights/rw_{args.model_name}_r100_cf3.json", "w") as f:
-            json.dump(dic_indic, f)
+        with open(f"../Reward_weights/rw_{args.model_name}_r100_cf3.json", "w") as rwd_file:
+            json.dump(dic_indic, rwd_file)
         print(f"rw_{args.model_name}_r100_cf3.json enregistré")
         
         rwd_mean = np.mean([row[1] for row in reward_evo[-100:]])
-        with open(f"../Reward_weights/rw_mean_{args.model_name}_r100_cf3.json","w") as f:
-            json.dump(rwd_mean, f) 
+        with open(f"../Reward_weights/rw_mean_{args.model_name}_r100_cf3.json","w") as rwd_mean_file:
+            json.dump(rwd_mean, rwd_mean_file) 
         print(f"rw_mean_{args.model_name}_r100_cf3.json enregistré")
     
     else:
