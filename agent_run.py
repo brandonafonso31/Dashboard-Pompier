@@ -56,7 +56,7 @@ if __name__ == "__main__":
     elif args.agent_model == "fqf":
         agent = FQF_Agent(**hyper_params)
     print("Agent", args.agent_model, "initialized", flush=True)
-
+        
     if args.train:
         if args.load:
             os.chdir('../SVG_model')
@@ -113,13 +113,18 @@ if __name__ == "__main__":
 
     wandb.init(project="simu_ff", name=args.model_name, config=hyper_params)
 
-    if os.path.exists("./shared_state_dqn.pt") and args.start != 1: # si  un état est enregistré (a été choisi aléatoirement) et on start pas depuis le début
+    initial_state = None
+    shared_state_path = os.path.join(SVG_MODEL_DIR, f"shared_state_pomo.pt")
+    if os.path.exists(shared_state_path) and args.start != 1:
         print(f"Agent {args.agent_id} charge shared_state_dqn.pt")
-        state = torch.load("./shared_state_dqn.pt", weights_only=False)
-    elected = get_current_elected(os.getcwd())
+        initial_state = torch.load(shared_state_path, weights_only=False)
     
     # for idx, inter in tqdm(df_pc.iloc[:-20].iterrows(), total=len(df_pc.iloc[:-20])):
     for idx, inter in df_pc.iterrows():
+        
+        if action_num == 0 and initial_state is not None:
+            print(f"[INFO] Utilisation de l'état partagé comme point de départ")
+            state = initial_state
     
         num_inter, date, pdd, required_departure, zone, duration, month, day, hour, minute, \
         coord_x, coord_y, month_sin, month_cos, day_sin, day_cos, hour_sin, hour_cos = inter
@@ -619,14 +624,11 @@ if __name__ == "__main__":
         #     clear_output(wait=True)
 
         #print(f"action_num = {action_num}")
-        print("DEBUG: Save check", action_num, args.agent_id, elected)
-        if action_num == 1 and args.agent_id == elected:
-            torch.save(state, os.path.join(SVG_MODEL_DIR, f"shared_state_pomo.pt"))
+        elected = get_current_elected(os.getcwd())
         if action_num % 200 == 0 and args.agent_id == elected:
             torch.save(state, os.path.join(SVG_MODEL_DIR, f"shared_state_pomo.pt"))
             print(f"[Agent {args.agent_id}] Élu pour sauvegarder à step {action_num}")
                 
-
 
         if num_inter % 10000 == 0 and args.train and required_departure == {0:"RETURN"}:   
             torch.save(agent.qnetwork_local.state_dict(), args.model_name)

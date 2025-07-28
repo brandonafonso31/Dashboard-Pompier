@@ -42,7 +42,7 @@ def run_agent(metric, agent_id, start, end):
     
     #print(start,end)
     
-    path = f"./rw_{model_name}_{suffix}.json"
+    path = f"rw_{model_name}_{suffix}.json"
     if start > 1 and os.path.exists(f"./Reward_weights/{path}"):
         file_name = path
         print(f"[INFO] Fichier de reward précédemment entraîné chargé : {file_name}")
