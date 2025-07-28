@@ -23,7 +23,7 @@ def run_agent(metric, agent_id, start, end):
     #print("\nBien arrivé dans la fonction run_agent !")
     
     suffix = "r100_cf3"
-    model_name = f"pomo_agent_{model_name}"
+    model_name = f"pomo_agent_{metric}"
     cmd = [
         "python3", "agent_run.py",
         "--model_name", model_name,
