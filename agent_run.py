@@ -619,10 +619,12 @@ if __name__ == "__main__":
         #     clear_output(wait=True)
 
         #print(f"action_num = {action_num}")
-        if action_num % 200 == 0:
-            if args.agent_id == elected:
-                torch.save(state, os.path.join(SVG_MODEL_DIR, f"shared_state_{args.agent_model}.pt"),weight_only=True)
-                print(f"[Agent {args.agent_id}] Élu pour sauvegarder à step {action_num}")
+        print("DEBUG: Save check", action_num, args.agent_id, elected)
+        if action_num == 1 and args.agent_id == elected:
+            torch.save(state, os.path.join(SVG_MODEL_DIR, f"shared_state_pomo.pt"))
+        if action_num % 200 == 0 and args.agent_id == elected:
+            torch.save(state, os.path.join(SVG_MODEL_DIR, f"shared_state_pomo.pt"))
+            print(f"[Agent {args.agent_id}] Élu pour sauvegarder à step {action_num}")
                 
 
 
