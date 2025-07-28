@@ -99,13 +99,26 @@ if __name__ == "__main__":
         except FileNotFoundError:
             print(f"Fichier pour {metric} non trouvé")
             continue
-    # Trouver la meilleure récompense et l'agent correspondant
-    best_metric = max(dic.keys(), key=lambda k: dic[k] if dic[k] is not None else float('-inf'))
+        
+    # Trouver la meilleure métrique et sa récompense
+    best_metric = max(metrics, key=lambda m: dic.get(m, float('-inf')))
     best_reward = dic[best_metric]
+
     print(f"\nMeilleure récompense: {best_reward} (agent {best_metric})")
-    # Écraser tous les fichiers avec la meilleure récompense
+
+    # Écraser les fichiers avec la meilleure récompense
     for metric in metrics:
         if metric != best_metric:
-            with open(f"./Reward_weights/rw_pomo_agent_{metric}_r100_cf3.json", "w") as f:
+            # Écraser le fichier mean
+            with open(f"./Reward_weights/rw_mean_pomo_agent_{metric}_r100_cf3.json", "w") as f:
                 json.dump(best_reward, f)
-            print(f"Écrasé le fichier de {metric} avec la meilleure récompense")
+            
+            # Écraser le fichier standard avec le contenu du meilleur agent
+            best_file_content = None
+            with open(f"./Reward_weights/rw_pomo_agent_{best_metric}_r100_cf3.json", "r") as best_file:
+                best_file_content = json.load(best_file)
+            
+            with open(f"./Reward_weights/rw_pomo_agent_{metric}_r100_cf3.json", "w") as target_file:
+                json.dump(best_file_content, target_file)
+            
+            print(f"Fichiers de {metric} écrasés avec la meilleure récompense de {best_metric}")
