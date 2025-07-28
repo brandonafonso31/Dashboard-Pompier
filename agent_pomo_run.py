@@ -91,7 +91,6 @@ if __name__ == "__main__":
     
     # Créer un dictionnaire pour stocker les récompenses
     dic = {metric: None for metric in metrics}
-    print("\nDictionnaire des rewards moyens :", dic)
     # Charger les récompenses depuis les fichiers
     for metric in metrics:
         try:

@@ -635,20 +635,27 @@ if __name__ == "__main__":
             print(num_inter, "Agent saved as", args.model_name, flush=True)
 
     if args.train:
+        # 1. Sauvegarde du modèle et des récompenses actuelles
         os.chdir('../SVG_model') 
-          
         torch.save(agent.qnetwork_local.state_dict(), args.model_name)
-        print("\nAgent saved as", args.model_name, flush=True)
-           
-        with open(f"../Reward_weights/rw_{args.model_name}_r100_cf3.json", "w") as rwd_file:
+        print(f"\nAgent saved as {args.model_name}", flush=True)
+
+        # Chemins des fichiers
+        reward_dir = "../Reward_weights"
+        current_reward_file = f"{reward_dir}/rw_{args.model_name}_r100_cf3.json"
+        current_mean_file = f"{reward_dir}/rw_mean_{args.model_name}_r100_cf3.json"
+
+        # 2. Sauvegarde des récompenses actuelles
+        with open(current_reward_file, "w") as rwd_file:
             json.dump(dic_indic, rwd_file)
-        print(f"rw_{args.model_name}_r100_cf3.json enregistré")
-        
+        print(f"Reward saved to {current_reward_file}")
+
+        # Calcul et sauvegarde de la moyenne
         rwd_mean = np.mean([row[1] for row in reward_evo[-100:]])
-        with open(f"../Reward_weights/rw_mean_{args.model_name}_r100_cf3.json","w") as rwd_mean_file:
-            json.dump(rwd_mean, rwd_mean_file) 
-        print(f"rw_mean_{args.model_name}_r100_cf3.json enregistré")
-    
+        with open(current_mean_file, "w") as rwd_mean_file:
+            json.dump(rwd_mean, rwd_mean_file)
+        print(f"Mean reward saved to {current_mean_file}")
+            
     else:
 
         os.chdir('../Plots')
