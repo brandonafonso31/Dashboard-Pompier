@@ -7,7 +7,28 @@ import os
 import json
 import pickle
 import torch
-import time
+
+def get_skills_from_role(df_roles, role):
+    return df_roles[(df_roles["Fonction"] == role)]["Competences"].reset_index(drop=True).values
+
+
+def get_ff_compatible(df, station, ff_available, date, plus, minus):
+
+    df_filtered = df.loc[ff_available, :]    
+    mask_all_competences = pd.concat([(df_filtered[(comp, "Début")] <= date) & (df_filtered[(comp, "Fin")] >= date)
+        for comp in plus], axis=1).all(axis=1)
+    
+    if len(df_filtered[mask_all_competences]) == 0:
+        return []
+
+    else:
+        ff_plus = df_filtered[mask_all_competences].index.tolist()
+        df_filtered_2 = df.loc[ff_plus, :]
+        mask_nan_debut = df_filtered_2[[(comp, 'Début') for comp in minus]].isna()
+        if len(df_filtered_2[mask_nan_debut.all(axis=1)]) == 0:
+            return []
+        else:            
+            return df_filtered_2[mask_nan_debut.all(axis=1)].index.tolist()
 
 def apply_logic(potential_actions, potential_skills, is_best):
 
@@ -184,46 +205,40 @@ def load_environment_variables(constraint_factor_veh, constraint_factor_ff, data
 def gen_state(veh_depart, idx_role, ff_array, ff_existing, dic_roles, dic_roles_skills, dic_ff, df_skills, \
              coord_x, coord_y, month_sin, month_cos, day_sin, day_cos, hour_sin, hour_cos, info_avail, max_duration, action_size):
 
+    nb_roles = 37
 
     # ff skills
     state = np.hstack(([get_roles_for_ff(veh, ff_array, dic_roles, dic_roles_skills) for veh in veh_depart])).astype(float)
 
     state /= 8 # normalization, 8 skill lvls
 
-    # filler row    
-    # if state.shape[0] > action_size:
-    #     print(state.shape[0])
-        
-    filler = np.zeros((action_size-state.shape[0], state.shape[1])) # max 74 de base + 6 ff lent + 1 role to fill
+
+    # filler row
+    filler = np.zeros((action_size-state.shape[0], state.shape[1])) # max 74 de base + 6 ff lent
     state = np.vstack((state, filler))
 
     # filler col
-    filler = np.zeros((state.shape[0], 37 - state.shape[1]))
+    filler = np.zeros((state.shape[0], nb_roles - state.shape[1]))
     state = np.concatenate((state, filler), axis=1)
 
-    # current role to fill
-    current_role = [0]*37
-    current_role[idx_role] = 1  
-    # state = np.insert(state, 0, np.array(current_role), axis=0)
-    state = np.vstack((current_role, state))
-    
-
     # resp time
-
     resp_time = np.array([dic_ff[f] for f in df_skills.loc[ff_existing, :].index])
     resp_time_norm = np.where(resp_time < 0, 0.0, resp_time/max_duration) # normalization
+    # resp_time_norm = np.where(resp_time < 0, 0, 1) # à voir avec mathieu pour l'AM
     mask_minus1 = (resp_time == -1) 
     mask_minus2 = (resp_time == -2)
     resp_time_all = np.stack([resp_time_norm, mask_minus1, mask_minus2], axis=1)
 
-    zero_row = np.zeros((1, resp_time_all.shape[1])) # for current role to fill
-    resp_time_all = np.vstack((zero_row, resp_time_all))
     zero_rows = np.zeros(((action_size-len(ff_existing)), resp_time_all.shape[1]))
     availability = np.vstack((resp_time_all, zero_rows))
 
-    
-    # availability = np.array([0] + resp_time_norm + [0]*(action_size-len(ff_existing)-1)).reshape(-1, 1)  
     state = np.hstack((state, availability))
+
+    # current role to fill
+    current_role = [0]*state.shape[1]
+    current_role[idx_role] = 1  
+    # state = np.insert(state, 0, np.array(current_role), axis=0)
+    state = np.vstack((current_role, state))
 
     # rl_infos + position + time
 
@@ -255,7 +270,8 @@ def compute_reward(dic_indic, dic_indic_old, num_d, dic_tarif):
 
         dic_delta = {key:(dic_indic[key] - dic_indic_old[key]) for key in dic_indic if key not in ['VSAV_disp', 'FPT_disp', 'EPA_disp']}
 
-        for m in dic_delta:                 
+        for m in dic_delta:
+
             reward += dic_delta[m] * dic_tarif[m]
 
         
@@ -270,6 +286,26 @@ def compute_reward(dic_indic, dic_indic_old, num_d, dic_tarif):
 
 
     return reward
+
+def lazy_step(action, num_d, num_role, mandatory, degraded, new_dic_indic, skill_lvl):
+
+    if action < 79:
+        
+        new_dic_indic['skill_lvl'] += skill_lvl * 8  # was normalized in state
+        
+    else: # aucun pompier n'a les compétences requises
+
+        
+        if (num_role > mandatory) and (num_d == 1): # Si le rôle est facultatif et que c'est 
+        # le 1er véhicule 
+
+            degraded = True
+
+        else: # Si le rôle n'est pas facultatif ou que ce n'est pas le 1er véhicule    
+
+            new_dic_indic['rupture_ff'] += 1
+
+    return new_dic_indic
 
 
 def step(action, idx_role, ff_existing, all_ff_waiting, current_station, Z_1, dic_lent, \
@@ -343,8 +379,6 @@ def get_mandatory_max(v):
 def create_dic_roles(df_vehicles_history):
 
     df_vehicles_history["Fonction"] = df_vehicles_history["Fonction"].fillna("")
-    dic_replace = {"IMP3_CUNITE":"IMP_CU", "IMP2_SAUV":"IMP_SAUV", "COND_ENG_NAUT":"COND_BMS_EB"}
-    df_vehicles_history["Fonction Occupee"] = df_vehicles_history["Fonction Occupee"].replace(dic_replace)
     dic_replace = {"XCOMPL":"COMPL"}
     df_vehicles_history["Fonction"] = df_vehicles_history["Fonction"].replace(dic_replace)
     
@@ -357,8 +391,6 @@ def create_dic_roles(df_vehicles_history):
         f = row["Fonction"]
         ofo = row["Ordre Fonction Occupee"]
         fo = row["Fonction Occupee"]
-        if fo == "CHEF DE GROUPE":
-            fo = "*CDG*"
         
         if (tm != ""):
             if tm not in dic_roles:
@@ -428,12 +460,12 @@ def get_role_from_skills(required_skills, ff_array):
     return first_valid_index
 
 def get_roles_for_ff(vehicle, ff_array, dic_roles, dic_roles_skills):
-    # if vehicle == "EP":
-    #     vehicle = "EPA"
+
     required_roles = dic_roles[vehicle]
 
     required_roles = [required_roles[k] for k in sorted(required_roles.keys())]
-    required_roles = [role if role in dic_roles_skills else 'EQ_ENG_SAP' for role in required_roles]
+    
+    # required_roles = [role if role in dic_roles_skills else 'EQ_ENG_SAP' for role in required_roles]
 
     return np.column_stack([get_role_from_skills(dic_roles_skills[role], ff_array).reshape(-1, 1) for role in required_roles])
 

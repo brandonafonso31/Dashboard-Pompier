@@ -43,29 +43,25 @@ if __name__ == "__main__":
 
     device = torch.device(hyper_params["device"])
     torch.autograd.set_detect_anomaly(True)
-    hyper_params["max_train_steps"] = (args.end-args.start) * 5 # (approx. 5 actions by intervention)
-    print("max_train_steps", hyper_params["max_train_steps"])
-    if args.agent_model == "dqn":
-        agent = DQN_Agent(**hyper_params)
-    elif args.agent_model == "fqf":
-        agent = FQF_Agent(**hyper_params)
-    elif args.agent_model == "pomo":
-        agent = POMO_Agent(**hyper_params)
+
+    if args.agent_model == "dt":
+        agent = DT_Agent(**hyper_params)
+
     print("Agent", args.agent_model, "initialized", flush=True)
 
     if args.train:
         if args.load:
             os.chdir('../SVG_model')
-            agent.qnetwork_local.load_state_dict(torch.load(args.model_name, weights_only=True))
+            agent.dt_network.load_state_dict(torch.load(args.model_name, weights_only=True))
             print("Weights loaded")
-        agent.qnetwork_local.train()
+        agent.dt_network.train()
         print("Train mode", flush=True)
 
     else:
-        eps = 0
+
         os.chdir('../SVG_model')
-        agent.qnetwork_local.load_state_dict(torch.load(args.model_name, weights_only=True))
-        agent.qnetwork_local.eval()
+        agent.dt_network.load_state_dict(torch.load(args.model_name, weights_only=True))
+        agent.dt_network.eval()
         
         print("Eval mode - weights loaded", flush=True)  
 
@@ -97,19 +93,23 @@ if __name__ == "__main__":
     EPA_sent, EPA_lent, EPA_needed, EPA_to_return, EPA_returning = (False,) * 5
     VSAV_disp, FPT_disp, EPA_disp = (0,)*3
 
-    eps_update = (args.end-args.start) // 23 # approx. 23 iterations to reach 5% of original eps
-    d = 1
-    print("eps_start", eps, "eps_update", eps_update, flush=True)
-
     max_duration = df_pc["Duration"].max()
     action_size = hyper_params["action_size"] # idx role + rl infos
     dic_indic_100 = dic_indic.copy()
+
+    traj_states = []
+    traj_actions = []
+    traj_rewards = []
+    traj_returns = []
+    traj_timesteps = []
+    t = 0  
+    max_len = 20 
+    store_cpt = 0
 
     os.chdir('../SVG_model')
 
     wandb.init(project="simu_ff", name=args.model_name, config=hyper_params)
 
-    # for idx, inter in tqdm(df_pc.iloc[:-20].iterrows(), total=len(df_pc.iloc[:-20])):
     for idx, inter in df_pc.iterrows():
     
         num_inter, date, pdd, required_departure, zone, duration, month, day, hour, minute, \
@@ -528,18 +528,10 @@ if __name__ == "__main__":
                                                               dic_roles, dic_roles_skills, dic_ff, df_skills, \
                                                               coord_x, coord_y, month_sin, month_cos, day_sin, \
                                                               day_cos, hour_sin, hour_cos, info_avail, max_duration, action_size)
-    
-                                            if compute and args.train:
-                                                l0 = agent.step(old_state, action, reward, state, inter_done)
-                                                if l0 is not None:
-                                                    loss = l0
-                                            else:
-                                                loss = 0
-                                                
-                                            action, skill_lvl = agent.act(state, all_ff_waiting, eps)
+                                                   
+                                            action, skill_lvl = agent.act(state, all_ff_waiting, traj_states, traj_actions, \
+                                                                          traj_rewards, traj_timesteps)
 
-                                            # if all_ff_waiting:
-                                                # print("action", action)
     
                                             dic_indic, dic_lent, all_roles_found, vehicle_found, planning, dic_vehicles, dic_ff, idx_role, \
                                             degraded = step(action, idx_role, ff_existing, all_ff_waiting, current_station, Z_1, dic_lent, \
@@ -557,7 +549,47 @@ if __name__ == "__main__":
                                             reward_evo.append([action_num, reward])
                                             
                                             old_state = state
-                                            compute = True
+
+                                            # Mise à jour des séquences
+                                            traj_states.append(torch.tensor(state, dtype=torch.float32))
+                                            traj_timesteps.append(torch.tensor(t))
+                                            
+                                            if args.train:                                            
+                                                traj_actions.append(torch.tensor(action))
+                                                traj_rewards.append(torch.tensor([reward], dtype=torch.float32))
+
+                                            else:
+                                                traj_actions.append(torch.tensor(0))  # padding / dummy action
+                                                traj_returns.append(torch.tensor(-2.3))  # RTG = 0 pour tous    
+                                        
+                                            t += 1
+
+                                            if len(traj_states) >= max_len:
+
+                                                traj_states = torch.stack(traj_states)
+                                                traj_actions = torch.stack(traj_actions)
+                                                
+                                                traj_timesteps = torch.stack(traj_timesteps)
+
+                                                if args.train:
+
+                                                    traj_returns = torch.tensor(traj_rewards[::-1]).cumsum(0).flip(0).unsqueeze(-1)
+                                            
+                                                    agent.store_trajectory(traj_states, traj_actions, traj_returns, traj_timesteps)
+    
+                                                    store_cpt += 1
+                                                
+                                                    loss = agent.learn()
+
+                                                else:
+
+                                                    traj_returns = torch.stack(traj_returns).unsqueeze(-1)
+
+                                                    loss = 0 # for print
+                                            
+                                                traj_states, traj_actions, traj_rewards, traj_returns, traj_timesteps = [], [], [], [], []
+                                                t = 0
+
 
                                 # else: # si aucun véhicule n'a la fonction requise
                                 #     print(num_inter, veh_depart, vehicle_to_find, "no vehicule found")
@@ -568,8 +600,8 @@ if __name__ == "__main__":
             rwd_mean = np.mean([row[1] for row in reward_evo[-100:]])
             lr = agent.optimizer.param_groups[0]['lr']
             
-            print(f"{num_inter} v_out: {vehicle_out} | rwd_mean: {rwd_mean:.2f} | v1notfroms1: {dic_indic['v1_not_sent_from_s1']} | v3notfroms3: {dic_indic['v3_not_sent_from_s3']} | v_not_found_ls: {dic_indic['v_not_found_in_last_station']} | deg: {dic_indic['v_degraded']}", flush=True)
-            print(f"{num_inter} z1_VSAV_sent: {dic_indic['z1_VSAV_sent']} | z1_FPT_sent: {dic_indic['z1_FPT_sent']} | z1_EPA_sent: {dic_indic['z1_EPA_sent']} | VSAV_disp: {VSAV_disp} | FPT_disp: {FPT_disp} | EPA_disp: {EPA_disp} |", flush=True)
+            print(f"{num_inter} v_out: {vehicle_out} | rwd_mean: {rwd_mean:.2f} | v1notfroms1: {dic_indic['v1_not_sent_from_s1']} | v3notfroms3: {dic_indic['v3_not_sent_from_s3']} | v_not_found_ls: {dic_indic['v_not_found_in_last_station']} | deg: {dic_indic['v_degraded']} | store: {store_cpt} ", flush=True)
+            print(f"{num_inter} z1_VSAV_sent: {dic_indic['z1_VSAV_sent']} | z1_FPT_sent: {dic_indic['z1_FPT_sent']} | z1_EPA_sent: {dic_indic['z1_EPA_sent']} | VSAV_disp: {VSAV_disp} | FPT_disp: {FPT_disp} | EPA_disp: {EPA_disp} | loss: {loss} ", flush=True)
 
             dic_delta = {key:(dic_indic[key] - dic_indic_100[key]) for key in dic_indic}
 
@@ -602,21 +634,14 @@ if __name__ == "__main__":
         wandb.save(args.model_name + ".pth")
                      
 
-        if args.eps_start > 0 and num_inter % eps_update == 0 and required_departure == {0:"RETURN"}:
-            eps = eps * 0.99**d
-            eps = max(0.05, eps)
-            d+=1
-        # if num_inter % 99 == 0:
-        #     clear_output(wait=True)
-
         if num_inter % 10000 == 0 and args.train and required_departure == {0:"RETURN"}:   
-            torch.save(agent.qnetwork_local.state_dict(), args.model_name)
+            torch.save(agent.dt_network.state_dict(), args.model_name)
             print(num_inter, "Agent saved as", args.model_name, flush=True)
 
     if args.train:
 
         os.chdir('../SVG_model')   
-        torch.save(agent.qnetwork_local.state_dict(), args.model_name)
+        torch.save(agent.dt_network.state_dict(), args.model_name)
         print("Agent saved as", args.model_name, flush=True)
         print()
 

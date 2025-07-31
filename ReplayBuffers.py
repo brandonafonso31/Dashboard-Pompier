@@ -3,6 +3,63 @@ from collections import deque, namedtuple
 import random
 import torch
 
+class DT_ReplayBuffer:
+    def __init__(self, buffer_size, batch_size):
+        self.memory = deque(maxlen=buffer_size)
+        self.batch_size = batch_size
+
+    def add(self, trajectory):
+        self.memory.append(trajectory)
+
+    def sample(self, max_len=None):
+        batch = random.sample(self.memory, self.batch_size)
+
+        if max_len is None:
+            max_len = max(len(traj[0]) for traj in batch)
+
+        state_batch, action_batch, reward_batch, timestep_batch = [], [], [], []
+
+        for states, actions, returns, timesteps in batch:
+            traj_len = states.size(0)
+
+            pad_len = max_len - traj_len
+            state_batch.append(torch.cat([states, torch.zeros(pad_len, *states.shape[1:])]))
+            action_batch.append(torch.cat([actions, torch.zeros(pad_len, dtype=torch.long)]))
+            reward_batch.append(torch.cat([returns, torch.zeros(pad_len, 1)]))
+            timestep_batch.append(torch.cat([timesteps, torch.zeros(pad_len, dtype=torch.long)]))
+
+        return (
+            torch.stack(state_batch),
+            torch.stack(action_batch),
+            torch.stack(reward_batch),
+            torch.stack(timestep_batch),
+            torch.tensor([[1]*len_ + [0]*(max_len - len_) for len_ in [s.size(0) for s, *_ in batch]], dtype=torch.bool)
+        )
+
+    def __len__(self):
+        return len(self.memory)
+
+
+class POMO_ReplayBuffer:
+    def __init__(self, buffer_size, batch_size):
+        self.memory = deque(maxlen=buffer_size)
+        self.batch_size = batch_size
+
+    def add(self, state, action, reward, mask):
+        self.memory.append((state, action, reward, mask))
+
+    def sample(self):
+        batch = random.sample(self.memory,self.batch_size)
+        states, actions, rewards, masks = zip(*batch)
+        states = torch.stack(states)
+        actions = torch.stack(actions)
+        rewards = torch.stack(rewards)
+        masks = torch.stack(masks)
+        return (states, actions, rewards, masks)
+
+    def __len__(self):
+        return len(self.memory)
+
 
 class ReplayBuffer:
 
