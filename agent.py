@@ -785,12 +785,13 @@ def filter_q_values(q_list, potential_actions):
 # POMO
 class POMO_Agent:
     
-    def __init__(self, state_size, action_size, feature_size, batch_size, update_every,
+    def __init__(self, state_size, action_size, layer_type, feature_size, batch_size, update_every,
                  layer_size, num_layers, lr, device, use_batchnorm, num_samples, buffer_size, seed):
         
         self.device = device
         self.state_size = state_size
         self.action_size = action_size
+        self.layer_type = layer_type
         self.batch_size = batch_size
         self.update_every = update_every
         self.num_samples = num_samples
