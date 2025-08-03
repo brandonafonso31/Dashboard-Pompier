@@ -785,28 +785,113 @@ def filter_q_values(q_list, potential_actions):
 # POMO
 class POMO_Agent:
     
-    def __init__(self, state_size, action_size, layer_type, feature_size, batch_size, update_every,
-                 layer_size, num_layers, lr, device, use_batchnorm, num_samples, buffer_size, seed):
+    def __init__(self,
+                 state_size,
+                 action_size,
+                 layer_type,
+                 layer_size,
+                 num_layers,
+                 use_batchnorm,
+                 n_steps,
+                 batch_size,
+                 buffer_size,
+                 lr,
+                 lr_dec,
+                 tau,
+                 gamma,
+                 munchausen,
+                 curiosity,
+                 curiosity_size,
+                 per,
+                 rdm,
+                 entropy_tau,
+                 entropy_tau_coeff,
+                 lo,
+                 alpha ,
+                 N,
+                 entropy_coeff,
+                 update_every,
+                 max_train_steps,
+                 decay_update,
+                 device,
+                 seed):
         
+                # Hyperparamètres d'apprentissage
+        self.lr = lr
+        self.lr_dec = lr_dec
+        self.tau = tau
+        self.gamma = gamma
+        self.seed = random.seed(seed)
         self.device = device
-        self.state_size = state_size
-        self.action_size = action_size
-        self.layer_type = layer_type
-        self.batch_size = batch_size
-        self.update_every = update_every
-        self.num_samples = num_samples
-        self.buffer_size = buffer_size
-        self.t_step = 0
-
-        self.network = POMO_Network(
-            state_size, action_size, feature_size,
+        
+        # Configuration du réseau
+        self.layer_size = layer_size
+        self.num_layers = num_layers
+        self.use_batchnorm = use_batchnorm
+        
+        # Mémoire de replay
+        self.memory = POMO_ReplayBuffer(buffer_size, batch_size, seed=seed)
+        self.per = per  # Prioritized Experience Replay
+        self.alpha = alpha  # Paramètre alpha pour PER
+        
+        # Exploration
+        self.entropy_tau = entropy_tau
+        self.entropy_tau_coeff = entropy_tau_coeff
+        self.entropy_coeff = entropy_coeff
+        self.rdm = rdm  # Random Network Distillation
+        self.curiosity = curiosity
+        self.curiosity_size = curiosity_size
+        
+        # Paramètres d'optimisation
+        self.n_steps = n_steps
+        self.max_train_steps = max_train_steps
+        self.decay_update = decay_update
+        self.lo = lo  # Loss option
+        self.N = N  # Nombre de steps pour n-step learning
+        
+        # Initialisation des composants spéciaux
+        if curiosity:
+            self.curiosity_module = CuriosityModule(
+                state_size, action_size, curiosity_size, device
+            )
+        
+        if per:
+            self.memory = PrioritizedReplayBuffer(
+                buffer_size, batch_size, alpha=alpha
+            )
+        
+        # Target network
+        self.target_network = POMO_Network(
+            state_size, action_size, layer_size,
             hidden_dim=layer_size,
             use_batchnorm=use_batchnorm,
             seed=seed
         ).to(device)
+        self.soft_update(self.network, self.target_network, tau=1.0)
         
-        self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
-        self.memory = POMO_ReplayBuffer(buffer_size, batch_size)
+        # Munchausen RL
+        self.munchausen = munchausen
+        if munchausen:
+            self.m_alpha = 0.9  # Paramètre alpha pour Munchausen
+            self.m_tau = 0.03  # Paramètre tau pour Munchausen
+            self.lo = 0.1  # Coefficient de régularisation
+            
+        # Learning rate scheduler
+        self.scheduler = optim.lr_scheduler.StepLR(
+            self.optimizer, 
+            step_size=decay_update, 
+            gamma=lr_dec
+        )
+    
+    def soft_update(self, local_model, target_model, tau):
+        """Soft update model parameters"""
+        for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
+            target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
+    
+    def hard_update(self, local_model, target_model):
+        """Hard update model parameters"""
+        self.soft_update(local_model, target_model, tau=1.0)
+    
 
     def act(self, state, all_ff_waiting):
         """
