@@ -269,13 +269,16 @@ class POMO_Network(nn.Module):
         # Decoder simple
         self.decoder = nn.Linear(self.hidden_dim, self.action_size)
         
-    def forward(self, x):
-        # x shape: (batch, n_nodes, input_dim)
-        encoded = self.encoder(x)  # shape: (batch, n_nodes, hidden_dim)
-        pomo_logits = []
-        for _ in range(self.pomo_size):
-            logits = self.decoder(encoded)  # shape: (batch, n_nodes, 1)
-            logits = logits.squeeze(-1)     # shape: (batch, n_nodes)
-            pomo_logits.append(logits)
-        # shape: (batch, pomo_size, n_nodes)
-        return torch.stack(pomo_logits, dim=1)
+    
+    def forward(self, x, mask_batch=None):
+        """ state_batch: [B, state_size], mask_batch: [B, action_size] or None """
+        batch_size = x.size(0)
+        x = self.encoder(x)  # [B, hidden_dim]
+        logits = self.decoder(x)       # [B, action_size]
+
+        if mask_batch is not None:
+            logits = logits + mask_batch  # appliquer masque -inf sur actions interdites
+
+        probs = torch.softmax(logits, dim=-1)  # [B, action_size]
+
+        return probs
