@@ -244,22 +244,24 @@ class FPN(nn.Module):
         
         return taus, taus_, entropy
     
-class POMO(nn.module):
-    """POMO: Policy Optimization with Model-based Off-policy"""
-    def __init__(self, num_layers = 8, hidden_dim=1024):
+class POMO(nn.Module):
+    def __init__(self, input_dim, hidden_dim, pomo_size):
         super().__init__()
+        self.pomo_size = pomo_size
         self.encoder = nn.Sequential(
-            nn.Linear(num_layers, hidden_dim),
+            nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim)
         )
         self.decoder = nn.Linear(hidden_dim, 1)
         
-    def forward(self, x, pomo_size=8):
-        # x: (batch, n_nodes, input_dim)
-        encoded = self.encoder(x)
-        all_logits = []
-        for _ in range(pomo_size):
-            logits = self.decoder(encoded)  # (batch, n_nodes, 1)
-            all_logits.append(logits)
-        return torch.stack(all_logits, dim=1)  # (batch, pomo_size, n_nodes, 1) 
+    def forward(self, x):
+        # x shape: (batch, n_nodes, input_dim)
+        encoded = self.encoder(x)  # shape: (batch, n_nodes, hidden_dim)
+        pomo_logits = []
+        for _ in range(self.pomo_size):
+            logits = self.decoder(encoded)  # shape: (batch, n_nodes, 1)
+            logits = logits.squeeze(-1)     # shape: (batch, n_nodes)
+            pomo_logits.append(logits)
+        # shape: (batch, pomo_size, n_nodes)
+        return torch.stack(pomo_logits, dim=1)
