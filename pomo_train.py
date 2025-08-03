@@ -1,5 +1,4 @@
 import torch
-from networks import POMO_Network
 from agent import POMO_Agent
 import torch.optim as optim
 
