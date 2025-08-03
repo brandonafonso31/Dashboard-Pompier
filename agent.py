@@ -784,48 +784,21 @@ def filter_q_values(q_list, potential_actions):
 
 # POMO
 class POMO_Agent:
-    def __init__(self,
-                 state_size,
-                 action_size,
-                 layer_type,
-                 layer_size,
-                 num_layers,
-                 use_batchnorm,
-                 n_steps,
-                 batch_size,
-                 buffer_size,
-                 lr,
-                 lr_dec,
-                 tau,
-                 gamma,
-                 munchausen,
-                 curiosity,
-                 curiosity_size,
-                 per,
-                 rdm,
-                 entropy_tau,
-                 entropy_tau_coeff,
-                 lo,
-                 alpha ,
-                 N,
-                 entropy_coeff,
-                 update_every,
-                 max_train_steps,
-                 decay_update,
-                 device,
-                 seed):
+    
+    def __init__(self, state_size, action_size, feature_size, batch_size, update_every,
+                 layer_size, num_layers, lr, device, use_batchnorm, num_samples, buffer_size, seed):
         
         self.device = device
         self.state_size = state_size
         self.action_size = action_size
         self.batch_size = batch_size
         self.update_every = update_every
-        self.num_layers = num_layers
+        self.num_samples = num_samples
         self.buffer_size = buffer_size
         self.t_step = 0
 
         self.network = POMO_Network(
-            state_size, action_size, layer_size,
+            state_size, action_size, feature_size,
             hidden_dim=layer_size,
             use_batchnorm=use_batchnorm,
             seed=seed
@@ -836,7 +809,7 @@ class POMO_Agent:
 
     def act(self, state, all_ff_waiting):
         """
-        Echantillonne `num_layers` actions pour un même état.
+        Echantillonne `num_samples` actions pour un même état.
         """
         potential_actions, potential_skills = get_potential_actions(state, all_ff_waiting)
 
@@ -844,15 +817,15 @@ class POMO_Agent:
         mask = torch.full((self.action_size,), float('-inf'), device=self.device)
         mask[potential_actions] = 0.0
 
-        state_batch = state_tensor.repeat(self.num_layers, 1)  # [num_layers, state_size]
-        mask_batch = mask.unsqueeze(0).repeat(self.num_layers, 1)  # [num_layers, action_size]
+        state_batch = state_tensor.repeat(self.num_samples, 1)  # [num_samples, state_size]
+        mask_batch = mask.unsqueeze(0).repeat(self.num_samples, 1)  # [num_samples, action_size]
 
         self.network.eval()
         with torch.no_grad():
-            logits = self.network(state_batch)  # [num_layers, action_size]
+            logits = self.network(state_batch)  # [num_samples, action_size]
             masked_logits = logits + mask_batch
             probs = torch.softmax(masked_logits, dim=-1)
-            actions = torch.multinomial(probs, num_layers=1).squeeze(1)  # [num_layers]
+            actions = torch.multinomial(probs, num_samples=1).squeeze(1)  # [num_samples]
         self.network.train()
 
         skill_levels = torch.tensor(
