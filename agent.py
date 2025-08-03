@@ -910,100 +910,99 @@ def filter_q_values(q_list, potential_actions):
 
 ### Decision Transformer
 
-class DT_Agent:
-    def __init__(self, state_size, action_size, feature_size, buffer_size, batch_size, update_every, num_layers, lr, layer_size, device, max_len, seed):
-        self.device = device
-        self.state_size = state_size
-        self.action_size = action_size
-        self.feature_size = feature_size
-        self.buffer_size = buffer_size
-        self.batch_size = batch_size
-        self.update_every = update_every
-        self.num_layers = num_layers
-        self.layer_size = layer_size
-        self.max_len = max_len
-        self.device = device
-        self.seed = seed
+# class DT_Agent:
+#     def __init__(self, state_size, action_size, feature_size, buffer_size, batch_size, update_every, num_layers, lr, layer_size, device, max_len, seed):
+#         self.device = device
+#         self.state_size = state_size
+#         self.action_size = action_size
+#         self.feature_size = feature_size
+#         self.buffer_size = buffer_size
+#         self.batch_size = batch_size
+#         self.update_every = update_every
+#         self.num_layers = num_layers
+#         self.layer_size = layer_size
+#         self.max_len = max_len
+#         self.device = device
+#         self.seed = seed
 
-        self.dt_network = DT_Network(self.state_size, self.action_size, self.feature_size, self.layer_size, self.num_layers, self.max_len, self.seed).to(device)
-        self.optimizer = optim.Adam(self.dt_network.parameters(), lr=lr)
+#         self.dt_network = DT_Network(self.state_size, self.action_size, self.feature_size, self.layer_size, self.num_layers, self.max_len, self.seed).to(device)
+#         self.optimizer = optim.Adam(self.dt_network.parameters(), lr=lr)
 
-        self.memory = DT_ReplayBuffer(self.buffer_size, self.batch_size)
+#         self.memory = DT_ReplayBuffer(self.buffer_size, self.batch_size)
 
-    def act(self, state, all_ff_waiting, traj_states, traj_actions, traj_returns, traj_timesteps):
+#     def act(self, state, all_ff_waiting, traj_states, traj_actions, traj_returns, traj_timesteps):
 
         
-        potential_actions, potential_skills = get_potential_actions(state, all_ff_waiting)
+#         potential_actions, potential_skills = get_potential_actions(state, all_ff_waiting)
 
-        # print(f"states={len(traj_states)}, actions={len(traj_actions)}, returns={len(traj_returns)}, timesteps={len(traj_timesteps)}")
+#         # print(f"states={len(traj_states)}, actions={len(traj_actions)}, returns={len(traj_returns)}, timesteps={len(traj_timesteps)}")
 
 
-        if len(traj_states) == 0 or len(traj_actions) == 0 or len(traj_returns) == 0 or len(traj_timesteps) == 0:
+#         if len(traj_states) == 0 or len(traj_actions) == 0 or len(traj_returns) == 0 or len(traj_timesteps) == 0:
 
-            action = random.choice(potential_actions)
-            skill_lvl = potential_skills[potential_actions.index(action)]
-            return action, skill_lvl
+#             action = random.choice(potential_actions)
+#             skill_lvl = potential_skills[potential_actions.index(action)]
+#             return action, skill_lvl
 
-        states=torch.stack(traj_states[-self.max_len:]).unsqueeze(0)
-        actions=torch.stack(traj_actions[-self.max_len:]).unsqueeze(0)
-        timesteps=torch.tensor(traj_timesteps[-self.max_len:]).unsqueeze(0)
+#         states=torch.stack(traj_states[-self.max_len:]).unsqueeze(0)
+#         actions=torch.stack(traj_actions[-self.max_len:]).unsqueeze(0)
+#         timesteps=torch.tensor(traj_timesteps[-self.max_len:]).unsqueeze(0)
         
-        if len(traj_returns) == 0:
-            returns_to_go = torch.zeros(1, 1, 1)  # fallback sécurisé
-            print("fallback")
-        else:
-            returns_to_go = torch.stack(traj_returns[-self.max_len:]).unsqueeze(0)  # [1, T, 1]
+#         if len(traj_returns) == 0:
+#             returns_to_go = torch.zeros(1, 1, 1)  # fallback sécurisé
+#             print("fallback")
+#         else:
+#             returns_to_go = torch.stack(traj_returns[-self.max_len:]).unsqueeze(0)  # [1, T, 1]
 
 
-        self.dt_network.eval()
-        with torch.no_grad():
-            mask = torch.ones(states.shape[:2], dtype=torch.bool).to(self.device)
-            logits = self.dt_network(states.to(self.device), actions.to(self.device), returns_to_go.to(self.device), timesteps.to(self.device), mask)
-            last_logits = logits[:, -1]
+#         self.dt_network.eval()
+#         with torch.no_grad():
+#             mask = torch.ones(states.shape[:2], dtype=torch.bool).to(self.device)
+#             logits = self.dt_network(states.to(self.device), actions.to(self.device), returns_to_go.to(self.device), timesteps.to(self.device), mask)
+#             last_logits = logits[:, -1]
             
 
-            mask_logits = torch.full_like(last_logits, float('-inf'))
-            mask_logits[:, potential_actions] = last_logits[:, potential_actions]
+#             mask_logits = torch.full_like(last_logits, float('-inf'))
+#             mask_logits[:, potential_actions] = last_logits[:, potential_actions]
             
-            probs = F.softmax(mask_logits, dim=-1)
-            action = torch.multinomial(probs, num_samples=1).item()
-        self.dt_network.train()
+#             probs = F.softmax(mask_logits, dim=-1)
+#             action = torch.multinomial(probs, num_samples=1).item()
+#         self.dt_network.train()
 
-        skill_lvl = potential_skills[potential_actions.index(action)]
+#         skill_lvl = potential_skills[potential_actions.index(action)]
 
-        return action, skill_lvl
+#         return action, skill_lvl
 
-    def store_trajectory(self, states, actions, returns_to_go, timesteps):
-        self.memory.add((states, actions, returns_to_go, timesteps))
-
-
-    def learn(self):
+#     def store_trajectory(self, states, actions, returns_to_go, timesteps):
+#         self.memory.add((states, actions, returns_to_go, timesteps))
 
 
-        if len(self.memory) < self.memory.batch_size:
-            return None
+#     def learn(self):
+
+
+#         if len(self.memory) < self.memory.batch_size:
+#             return None
         
-        states, actions, returns, timesteps, mask = self.memory.sample()
+#         states, actions, returns, timesteps, mask = self.memory.sample()
 
-        states, mask = pad_and_mask(states)
-        actions, _ = pad_and_mask(actions)
-        returns, _ = pad_and_mask(returns)
-        timesteps, _ = pad_and_mask(timesteps)
+#         states, mask = pad_and_mask(states)
+#         actions, _ = pad_and_mask(actions)
+#         returns, _ = pad_and_mask(returns)
+#         timesteps, _ = pad_and_mask(timesteps)
 
-        states = states.to(self.device)
-        actions = actions.to(self.device)
-        returns = returns.to(self.device)
-        timesteps = timesteps.to(self.device)
-        mask = mask.to(self.device)
+#         states = states.to(self.device)
+#         actions = actions.to(self.device)
+#         returns = returns.to(self.device)
+#         timesteps = timesteps.to(self.device)
+#         mask = mask.to(self.device)
 
-        self.optimizer.zero_grad()
-        logits = self.dt_network(states, actions, returns, timesteps, mask)
-        logits = logits[:, -1]  # last step prediction
+#         self.optimizer.zero_grad()
+#         logits = self.dt_network(states, actions, returns, timesteps, mask)
+#         logits = logits[:, -1]  # last step prediction
 
-        targets = actions[:, -1]
-        loss = F.cross_entropy(logits, targets)
-        loss.backward()
-        clip_grad_norm_(self.dt_network.parameters(), 1.0)
-        self.optimizer.step()
-        return loss.item()
-
+#         targets = actions[:, -1]
+#         loss = F.cross_entropy(logits, targets)
+#         loss.backward()
+#         clip_grad_norm_(self.dt_network.parameters(), 1.0)
+#         self.optimizer.step()
+#         return loss.item()
