@@ -816,72 +816,74 @@ class POMO_Agent:
                  device,
                  seed):
         
-                # Hyperparamètres d'apprentissage
-        self.lr = lr
-        self.lr_dec = lr_dec
-        self.tau = tau
-        self.gamma = gamma
-        self.seed = random.seed(seed)
-        self.device = device
-        
-        # Configuration du réseau
+        self.state_size = state_size
+        self.action_size = action_size
+        self.layer_type = layer_type
         self.layer_size = layer_size
         self.num_layers = num_layers
         self.use_batchnorm = use_batchnorm
-        
-        # Mémoire de replay
-        self.memory = POMO_ReplayBuffer(buffer_size, batch_size, seed=seed)
-        self.per = per  # Prioritized Experience Replay
-        self.alpha = alpha  # Paramètre alpha pour PER
-        
-        # Exploration
-        self.entropy_tau = entropy_tau
-        self.entropy_tau_coeff = entropy_tau_coeff
+        self.seed = seed
+        self.tseed = torch.manual_seed(seed)
+        self.device = device
+        self.tau = tau
+        self.gamma = gamma
+        self.update_every = update_every
+        self.t_step = 0
+        self.batch_size = batch_size
+        self.Q_updates = 1 # to match with decay update
+        self.n_steps = n_steps
         self.entropy_coeff = entropy_coeff
-        self.rdm = rdm  # Random Network Distillation
+        self.N = N
+        self.lr = lr
+        self.lr_dec = lr_dec
+        self.per = per
+        self.rdm = rdm
+        # munchausen params
+        self.munchausen = munchausen
         self.curiosity = curiosity
         self.curiosity_size = curiosity_size
+        self.eta = .1
+        self.entropy_tau = entropy_tau
+        self.entropy_tau_coeff = entropy_tau_coeff
+        self.lo = lo
+        self.alpha = alpha   
+        self.max_train_steps = max_train_steps # 80k for 10k resp, for lr decay
+        self.decay_update =  decay_update # Q updates % decay update => lr decay
+        print("lr decay:", self.lr_dec, "decay_update:", self.decay_update, "PER", self.per)
+        self.grad_clip = 1 #1, 10 ?
+
+	    # Q-Network
+
+        self.qnetwork_local = Dueling_QNetwork(state_size, action_size,layer_size, n_steps, seed, num_layers, layer_type, use_batchnorm).to(device)
+        self.qnetwork_target = Dueling_QNetwork(state_size, action_size,layer_size, n_steps, seed, num_layers, layer_type, use_batchnorm).to(device)
+
+        # Optimizer
         
-        # Paramètres d'optimisation
-        self.n_steps = n_steps
-        self.max_train_steps = max_train_steps
-        self.decay_update = decay_update
-        self.lo = lo  # Loss option
-        self.N = N  # Nombre de steps pour n-step learning
+        self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=lr)
+
+        if self.lr_dec == 0:
+            self.optimizer = schedulefree.AdamWScheduleFree(self.qnetwork_local.parameters(), lr=lr)
+            print("Schedule Free Optimizer")
+            # self.optimizer.train()
+
+        print(self.qnetwork_local)
         
-        # Initialisation des composants spéciaux
-        if curiosity:
-            self.curiosity_module = CuriosityModule(
-                state_size, action_size, curiosity_size, device
-            )
-        
-        if per:
-            self.memory = PrioritizedReplayBuffer(
-                buffer_size, batch_size, alpha=alpha
-            )
-        
-        # Target network
-        self.target_network = POMO_Network(
-            state_size, action_size, layer_size,
-            hidden_dim=layer_size,
-            use_batchnorm=use_batchnorm,
-            seed=seed
-        ).to(device)
-        self.soft_update(self.network, self.target_network, tau=1.0)
-        
-        # Munchausen RL
-        self.munchausen = munchausen
-        if munchausen:
-            self.m_alpha = 0.9  # Paramètre alpha pour Munchausen
-            self.m_tau = 0.03  # Paramètre tau pour Munchausen
-            self.lo = 0.1  # Coefficient de régularisation
+        # Replay memory Standard (random simple)
+        if self.per == 0:
+            self.memory = ReplayBuffer(buffer_size, batch_size, seed, gamma, n_steps, rdm)
+        # Replay memory PER
+        elif self.per == 1:
+            self.memory = PrioritizedReplay(buffer_size, batch_size, seed, gamma, n_steps)
+        # Replay memory PER Sum Tree
+        elif self.per == 2:
+            self.memory = N_Steps_Prioritized_ReplayBuffer(buffer_size, batch_size, seed, gamma, n_steps)
             
-        # Learning rate scheduler
-        self.scheduler = optim.lr_scheduler.StepLR(
-            self.optimizer, 
-            step_size=decay_update, 
-            gamma=lr_dec
-        )
+        # Curiosity
+        if self.curiosity != 0:
+            inverse_m = Inverse(self.state_size, self.action_size, self.curiosity_size)
+            forward_m = Forward(self.state_size, self.action_size, inverse_m.calc_input_layer(), device=device)
+            self.ICM = ICM(inverse_m, forward_m).to(device)
+            print(inverse_m, forward_m)
     
     def soft_update(self, local_model, target_model, tau):
         """Soft update model parameters"""
