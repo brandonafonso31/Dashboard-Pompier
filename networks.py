@@ -244,3 +244,16 @@ class FPN(nn.Module):
         
         return taus, taus_, entropy
     
+class POMO(nn.module):
+    """POMO: Policy Optimization with Model-based Off-policy"""
+    def __init__(self, num_layers = 8, hidden_dim=1024):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(num_layers, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+        self.decoder = nn.Linear(hidden_dim, 1)
+        
+    def forward(self):
+        pass  # Implement forward pass if needed
