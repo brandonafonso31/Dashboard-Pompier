@@ -255,5 +255,11 @@ class POMO(nn.module):
         )
         self.decoder = nn.Linear(hidden_dim, 1)
         
-    def forward(self):
-        pass  # Implement forward pass if needed
+    def forward(self, x, pomo_size=8):
+        # x: (batch, n_nodes, input_dim)
+        encoded = self.encoder(x)
+        all_logits = []
+        for _ in range(pomo_size):
+            logits = self.decoder(encoded)  # (batch, n_nodes, 1)
+            all_logits.append(logits)
+        return torch.stack(all_logits, dim=1)  # (batch, pomo_size, n_nodes, 1) 
