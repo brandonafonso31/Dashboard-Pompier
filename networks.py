@@ -245,40 +245,42 @@ class FPN(nn.Module):
         return taus, taus_, entropy
     
 class POMO_Network(nn.Module):
-    def __init__(self, state_size, action_size, feature_size, layer_size, use_batchnorm, seed):
+    def __init__(self, state_size, action_size, feature_size, hidden_dim, use_batchnorm, seed):
         super().__init__()
         self.seed = torch.manual_seed(seed)
 
         self.state_size = state_size
         self.action_size = action_size
         self.feature_size = feature_size
-        self.hidden_dim = layer_size
-        self.use_batchnorm = use_batchnorm
+        self.hidden_dim = hidden_dim
 
-        # Encoder simple
-        self.encoder = nn.Sequential(
-            nn.Linear(self.state_size, self.hidden_dim),
+        # Encoder
+        layers = [
+            nn.Linear(state_size, hidden_dim),
             nn.ReLU(),
-            nn.Linear(self.hidden_dim, self.hidden_dim)
-        )
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU()
+        ]
+        if use_batchnorm:
+            layers.insert(3, nn.BatchNorm1d(hidden_dim))  # après 1ère ReLU
 
-        # Optional BatchNorm
-        if self.use_batchnorm:
-            self.encoder.add_module("batch_norm", nn.BatchNorm1d(self.hidden_dim))
+        self.encoder = nn.Sequential(*layers)
 
-        # Decoder simple
-        self.decoder = nn.Linear(self.hidden_dim, self.action_size)
-        
-    
+        # Decoder
+        self.decoder = nn.Linear(hidden_dim, action_size)
+
     def forward(self, x, mask_batch=None):
-        """ state_batch: [B, state_size], mask_batch: [B, action_size] or None """
-        batch_size = x.size(0)
+        """
+        Args:
+            x: [B, state_size]
+            mask_batch: [B, action_size] or None
+        Returns:
+            logits: [B, action_size]
+        """
         x = self.encoder(x)  # [B, hidden_dim]
-        logits = self.decoder(x)       # [B, action_size]
+        logits = self.decoder(x)  # [B, action_size]
 
         if mask_batch is not None:
-            logits = logits + mask_batch  # appliquer masque -inf sur actions interdites
+            logits = logits + mask_batch  # ajouter -inf aux actions interdites
 
-        probs = torch.softmax(logits, dim=-1)  # [B, action_size]
-
-        return probs
+        return logits

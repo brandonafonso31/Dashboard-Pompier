@@ -783,109 +783,92 @@ def filter_q_values(q_list, potential_actions):
         return 79
 
 # POMO
-
-def build_action_mask_batch(batch_valid_actions, action_space_size):
-    batch_size = len(batch_valid_actions)
-    mask = torch.full((batch_size, action_space_size), float('-inf'))
-    for i, valid in enumerate(batch_valid_actions):
-        mask[i, valid] = 0.0
-    return mask
-
-
 class POMO_Agent:
-    def __init__(self, state_size, action_size, feature_size, batch_size, update_every, layer_size, num_layers, lr, device, use_batchnorm, num_samples, buffer_size, seed):
+    def __init__(self, state_size, action_size, feature_size, batch_size, update_every,
+                 layer_size, num_layers, lr, device, use_batchnorm, num_samples, buffer_size, seed):
+        
         self.device = device
         self.state_size = state_size
         self.action_size = action_size
-        self.feature_size = feature_size
-        self.buffer_size = buffer_size
         self.batch_size = batch_size
         self.update_every = update_every
-        self.num_layers = num_layers
-        self.layer_size = layer_size
-        self.use_batchnorm = use_batchnorm
         self.num_samples = num_samples
-        self.seed = seed
+        self.buffer_size = buffer_size
         self.t_step = 0
-        
-        self.pomo_network = POMO_Network(self.state_size, self.action_size, self.feature_size, self.layer_size, self.use_batchnorm, self.seed).to(device)
-        self.optimizer = optim.Adam(self.pomo_network.parameters(), lr=lr)
-        self.memory = POMO_ReplayBuffer(self.buffer_size, self.batch_size)
-        
 
+        self.network = POMO_Network(
+            state_size, action_size, feature_size,
+            hidden_dim=layer_size,
+            use_batchnorm=use_batchnorm,
+            seed=seed
+        ).to(device)
+        
+        self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
+        self.memory = POMO_ReplayBuffer(buffer_size, batch_size)
 
     def act(self, state, all_ff_waiting):
-
+        """
+        Echantillonne `num_samples` actions pour un même état.
+        """
         potential_actions, potential_skills = get_potential_actions(state, all_ff_waiting)
-        state = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
-        mask = torch.full((self.action_size,), float('-inf'))
+
+        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
+        mask = torch.full((self.action_size,), float('-inf'), device=self.device)
         mask[potential_actions] = 0.0
-    
-        actions_list = []
-        skill_levels_list = []
 
-        if len(potential_actions) == 1:
-            current_num_samples = 1
-        else:
-            current_num_samples = self.num_samples
-    
-        for _ in range(current_num_samples):
+        state_batch = state_tensor.repeat(self.num_samples, 1)  # [num_samples, state_size]
+        mask_batch = mask.unsqueeze(0).repeat(self.num_samples, 1)  # [num_samples, action_size]
 
-            self.pomo_network.eval()
-            with torch.no_grad():
-                logits = self.pomo_network(state).squeeze(0)
-                masked_logits = logits + mask.to(self.device)
-                probs = torch.softmax(masked_logits, dim=-1)
-                action = torch.multinomial(probs, num_samples=1).item()
-            self.pomo_network.train()
-    
-            actions_list.append(action)
-            skill_levels_list.append(potential_skills[potential_actions.index(action)])
-    
-        actions = torch.tensor(actions_list)
-        skill_levels = torch.tensor(skill_levels_list).float()
-        masks = mask.unsqueeze(0).repeat(self.num_samples, 1).to(self.device) 
-    
-        return actions.cpu(), masks, skill_levels
+        self.network.eval()
+        with torch.no_grad():
+            logits = self.network(state_batch)  # [num_samples, action_size]
+            masked_logits = logits + mask_batch
+            probs = torch.softmax(masked_logits, dim=-1)
+            actions = torch.multinomial(probs, num_samples=1).squeeze(1)  # [num_samples]
+        self.network.train()
+
+        skill_levels = torch.tensor(
+            [potential_skills[potential_actions.index(a.item())] for a in actions],
+            dtype=torch.float32
+        )
+
+        return actions.cpu(), mask_batch.cpu(), skill_levels
 
     def compute_loss(self, states, actions, rewards, masks):
+        """
+        states: [B, state_dim]
+        actions: [B * P]
+        rewards: [B * P]
+        masks: [B * P, action_size]
+        """
+        B = states.size(0)
+        P = actions.size(0) // B
+
         states = states.to(self.device)
         actions = actions.to(self.device)
         rewards = rewards.to(self.device)
         masks = masks.to(self.device)
 
-        B = states.size(0)
-        num_samples = actions.size(0) // B
-        actions = actions.view(B, num_samples)
-        rewards = rewards.view(B, num_samples)
-        masks = masks.view(-1, masks.size(-1)) 
+        logits = self.network(states.repeat_interleave(P, dim=0))  # [B*P, action_size]
+        logits = logits + masks  # apply -inf masks
 
-        logits = self.pomo_network(states)
-        logits = logits + masks
-        
         log_probs = torch.log_softmax(logits, dim=1)
+        selected_log_probs = log_probs.gather(1, actions.view(-1, 1)).squeeze(1)  # [B*P]
 
-        selected_log_probs = log_probs.gather(1, actions.view(-1, 1).to(self.device)).squeeze(1)
-        selected_log_probs = selected_log_probs.view(B, num_samples)
+        selected_log_probs = selected_log_probs.view(B, P)
+        rewards = rewards.view(B, P)
 
-        # baseline = rewards.mean(dim=1, keepdim=True)
-        # advantages = rewards - baseline # suppression de la baseline pour tester les rewards
-
-        if rewards.abs().sum() == 0:
-            loss = -selected_log_probs.mean()
-        else:
-
-            baseline = rewards.mean(dim=1, keepdim=True)
-            advantages = rewards - baseline
-            loss = -(selected_log_probs * advantages.to(self.device)).mean()
+        baseline = rewards.mean(dim=1, keepdim=True)
+        advantages = rewards - baseline  # [B, P]
+        loss = -(selected_log_probs * advantages.detach()).mean()
         return loss
-    
+
     def learn(self, experiences):
         self.optimizer.zero_grad()
         states, actions, rewards, masks = experiences
         loss = self.compute_loss(states, actions, rewards, masks)
         loss.backward()
-        clip_grad_norm_(self.pomo_network.parameters(), 1.0)
+        clip_grad_norm_(self.network.parameters(), 1.0)
         self.optimizer.step()
         return loss.item()
 
@@ -894,17 +877,11 @@ class POMO_Agent:
             self.memory.add(s, a, r, m)
 
         self.t_step += 1
-        
-        if (self.t_step) % self.update_every == 0:
+        if self.t_step % self.update_every == 0 and len(self.memory) > self.batch_size:
+            experiences = self.memory.sample()
+            return self.learn(experiences)
+        return None
 
-            if len(self.memory) > self.batch_size:
-                experiences = self.memory.sample() 
-                loss = self.learn(experiences)
-
-                return loss
-
-        else:
-            return None
 
 ### Decision Transformer
 
