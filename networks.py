@@ -245,29 +245,25 @@ class FPN(nn.Module):
         return taus, taus_, entropy
     
 class POMO_Network(nn.Module):
-    def __init__(self, state_size, action_size, layer_size, hidden_dim, use_batchnorm, seed, n_steps=None):
+    def __init__(self, state_size, action_size, layer_size, num_layers, use_batchnorm, seed):
         super().__init__()
         self.seed = torch.manual_seed(seed)
-
-        self.state_size = state_size
-        self.action_size = action_size
-        self.layer_size = layer_size
-        self.hidden_dim = hidden_dim
-
-        # Encoder
-        layers = [
-            nn.Linear(state_size, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU()
-        ]
-        if use_batchnorm:
-            layers.insert(3, nn.BatchNorm1d(hidden_dim))  # après 1ère ReLU
+        
+        # Construction dynamique des couches
+        layers = []
+        input_dim = state_size
+        
+        for _ in range(num_layers):
+            layers.extend([
+                nn.Linear(input_dim, layer_size),
+                nn.ReLU()
+            ])
+            if use_batchnorm:
+                layers.append(nn.BatchNorm1d(layer_size))
+            input_dim = layer_size  # Les couches suivantes prennent layer_size en entrée
 
         self.encoder = nn.Sequential(*layers)
-
-        # Decoder
-        self.decoder = nn.Linear(hidden_dim, action_size)
+        self.decoder = nn.Linear(layer_size, action_size)  # Couche de sortie
 
     def forward(self, x, mask_batch=None):
         """

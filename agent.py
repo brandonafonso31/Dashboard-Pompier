@@ -784,27 +784,37 @@ def filter_q_values(q_list, potential_actions):
 
 # POMO
 class POMO_Agent:
-    def __init__(self, state_size, action_size, layer_size, use_batchnorm, device, seed):
-        # ... (garder vos paramètres existants)
-        
-        # Remplacer la création des Q-networks par :
-        self.qnetwork_local = POMO_Network(
-            state_size=state_size,
-            action_size=action_size,
-            layer_size=layer_size,
-            hidden_dim=layer_size,
-            use_batchnorm=use_batchnorm,
-            seed=seed
-        ).to(device)
-        
-        self.qnetwork_target = POMO_Network(
-            state_size=state_size,
-            action_size=action_size,
-            feature_size=layer_size,
-            hidden_dim=layer_size,
-            use_batchnorm=use_batchnorm,
-            seed=seed
-        ).to(device)
+    def __init__(self, state_size, action_size, layer_size, num_layers, use_batchnorm, device, seed, **kwargs):
+        """
+        Args:
+            state_size: Dimension de l'espace d'état
+            action_size: Dimension de l'espace d'action
+            layer_size: Taille des couches cachées (hidden_dim)
+            num_layers: Nombre de couches cachées
+            use_batchnorm: Booléen pour l'utilisation de BatchNorm
+            device: Device PyTorch (cuda/cpu)
+            seed: Seed pour la reproductibilité
+        """
+        self.state_size = state_size
+        self.action_size = action_size
+        self.layer_size = layer_size
+        self.num_layers = num_layers
+        self.use_batchnorm = use_batchnorm
+        self.device = device
+        self.seed = seed
+
+        # Initialisation des réseaux (version unifiée)
+        network_args = {
+            'state_size': state_size,
+            'action_size': action_size,
+            'layer_size': layer_size,  # À utiliser au lieu de hidden_dim
+            'num_layers': num_layers,
+            'use_batchnorm': use_batchnorm,
+            'seed': seed
+        }
+
+        self.qnetwork_local = POMO_Network(**network_args).to(device)
+        self.qnetwork_target = POMO_Network(**network_args).to(device)
 
 
 ### Decision Transformer
