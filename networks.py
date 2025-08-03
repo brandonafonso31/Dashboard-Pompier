@@ -245,13 +245,13 @@ class FPN(nn.Module):
         return taus, taus_, entropy
     
 class POMO_Network(nn.Module):
-    def __init__(self, state_size, action_size, feature_size, hidden_dim, use_batchnorm, seed):
+    def __init__(self, state_size, action_size, layer_size, hidden_dim, use_batchnorm, seed, n_steps=None):
         super().__init__()
         self.seed = torch.manual_seed(seed)
 
         self.state_size = state_size
         self.action_size = action_size
-        self.feature_size = feature_size
+        self.layer_size = layer_size
         self.hidden_dim = hidden_dim
 
         # Encoder

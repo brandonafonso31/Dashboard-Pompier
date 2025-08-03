@@ -784,192 +784,27 @@ def filter_q_values(q_list, potential_actions):
 
 # POMO
 class POMO_Agent:
-    
-    def __init__(self,
-                 state_size,
-                 action_size,
-                 layer_type,
-                 layer_size,
-                 num_layers,
-                 use_batchnorm,
-                 n_steps,
-                 batch_size,
-                 buffer_size,
-                 lr,
-                 lr_dec,
-                 tau,
-                 gamma,
-                 munchausen,
-                 curiosity,
-                 curiosity_size,
-                 per,
-                 rdm,
-                 entropy_tau,
-                 entropy_tau_coeff,
-                 lo,
-                 alpha ,
-                 N,
-                 entropy_coeff,
-                 update_every,
-                 max_train_steps,
-                 decay_update,
-                 device,
-                 seed):
+    def __init__(self, state_size, action_size, layer_size, use_batchnorm, device, seed):
+        # ... (garder vos paramètres existants)
         
-        self.state_size = state_size
-        self.action_size = action_size
-        self.layer_type = layer_type
-        self.layer_size = layer_size
-        self.num_layers = num_layers
-        self.use_batchnorm = use_batchnorm
-        self.seed = seed
-        self.tseed = torch.manual_seed(seed)
-        self.device = device
-        self.tau = tau
-        self.gamma = gamma
-        self.update_every = update_every
-        self.t_step = 0
-        self.batch_size = batch_size
-        self.Q_updates = 1 # to match with decay update
-        self.n_steps = n_steps
-        self.entropy_coeff = entropy_coeff
-        self.N = N
-        self.lr = lr
-        self.lr_dec = lr_dec
-        self.per = per
-        self.rdm = rdm
-        # munchausen params
-        self.munchausen = munchausen
-        self.curiosity = curiosity
-        self.curiosity_size = curiosity_size
-        self.eta = .1
-        self.entropy_tau = entropy_tau
-        self.entropy_tau_coeff = entropy_tau_coeff
-        self.lo = lo
-        self.alpha = alpha   
-        self.max_train_steps = max_train_steps # 80k for 10k resp, for lr decay
-        self.decay_update =  decay_update # Q updates % decay update => lr decay
-        print("lr decay:", self.lr_dec, "decay_update:", self.decay_update, "PER", self.per)
-        self.grad_clip = 1 #1, 10 ?
-
-	    # Q-Network
-
-        self.qnetwork_local = Dueling_QNetwork(state_size, action_size,layer_size, n_steps, seed, num_layers, layer_type, use_batchnorm).to(device)
-        self.qnetwork_target = Dueling_QNetwork(state_size, action_size,layer_size, n_steps, seed, num_layers, layer_type, use_batchnorm).to(device)
-
-        # Optimizer
+        # Remplacer la création des Q-networks par :
+        self.qnetwork_local = POMO_Network(
+            state_size=state_size,
+            action_size=action_size,
+            layer_size=layer_size,
+            hidden_dim=layer_size,
+            use_batchnorm=use_batchnorm,
+            seed=seed
+        ).to(device)
         
-        self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=lr)
-
-        if self.lr_dec == 0:
-            self.optimizer = schedulefree.AdamWScheduleFree(self.qnetwork_local.parameters(), lr=lr)
-            print("Schedule Free Optimizer")
-            # self.optimizer.train()
-
-        print(self.qnetwork_local)
-        
-        # Replay memory Standard (random simple)
-        if self.per == 0:
-            self.memory = ReplayBuffer(buffer_size, batch_size, seed, gamma, n_steps, rdm)
-        # Replay memory PER
-        elif self.per == 1:
-            self.memory = PrioritizedReplay(buffer_size, batch_size, seed, gamma, n_steps)
-        # Replay memory PER Sum Tree
-        elif self.per == 2:
-            self.memory = N_Steps_Prioritized_ReplayBuffer(buffer_size, batch_size, seed, gamma, n_steps)
-            
-        # Curiosity
-        if self.curiosity != 0:
-            inverse_m = Inverse(self.state_size, self.action_size, self.curiosity_size)
-            forward_m = Forward(self.state_size, self.action_size, inverse_m.calc_input_layer(), device=device)
-            self.ICM = ICM(inverse_m, forward_m).to(device)
-            print(inverse_m, forward_m)
-    
-    def soft_update(self, local_model, target_model, tau):
-        """Soft update model parameters"""
-        for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
-            target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
-    
-    def hard_update(self, local_model, target_model):
-        """Hard update model parameters"""
-        self.soft_update(local_model, target_model, tau=1.0)
-    
-
-    def act(self, state, all_ff_waiting):
-        """
-        Echantillonne `num_samples` actions pour un même état.
-        """
-        potential_actions, potential_skills = get_potential_actions(state, all_ff_waiting)
-
-        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
-        mask = torch.full((self.action_size,), float('-inf'), device=self.device)
-        mask[potential_actions] = 0.0
-
-        state_batch = state_tensor.repeat(self.num_samples, 1)  # [num_samples, state_size]
-        mask_batch = mask.unsqueeze(0).repeat(self.num_samples, 1)  # [num_samples, action_size]
-
-        self.network.eval()
-        with torch.no_grad():
-            logits = self.network(state_batch)  # [num_samples, action_size]
-            masked_logits = logits + mask_batch
-            probs = torch.softmax(masked_logits, dim=-1)
-            actions = torch.multinomial(probs, num_samples=1).squeeze(1)  # [num_samples]
-        self.network.train()
-
-        skill_levels = torch.tensor(
-            [potential_skills[potential_actions.index(a.item())] for a in actions],
-            dtype=torch.float32
-        )
-
-        return actions.cpu(), mask_batch.cpu(), skill_levels
-
-    def compute_loss(self, states, actions, rewards, masks):
-        """
-        states: [B, state_dim]
-        actions: [B * P]
-        rewards: [B * P]
-        masks: [B * P, action_size]
-        """
-        B = states.size(0)
-        P = actions.size(0) // B
-
-        states = states.to(self.device)
-        actions = actions.to(self.device)
-        rewards = rewards.to(self.device)
-        masks = masks.to(self.device)
-
-        logits = self.network(states.repeat_interleave(P, dim=0))  # [B*P, action_size]
-        logits = logits + masks  # apply -inf masks
-
-        log_probs = torch.log_softmax(logits, dim=1)
-        selected_log_probs = log_probs.gather(1, actions.view(-1, 1)).squeeze(1)  # [B*P]
-
-        selected_log_probs = selected_log_probs.view(B, P)
-        rewards = rewards.view(B, P)
-
-        baseline = rewards.mean(dim=1, keepdim=True)
-        advantages = rewards - baseline  # [B, P]
-        loss = -(selected_log_probs * advantages.detach()).mean()
-        return loss
-
-    def learn(self, experiences):
-        self.optimizer.zero_grad()
-        states, actions, rewards, masks = experiences
-        loss = self.compute_loss(states, actions, rewards, masks)
-        loss.backward()
-        clip_grad_norm_(self.network.parameters(), 1.0)
-        self.optimizer.step()
-        return loss.item()
-
-    def step(self, state_batch, action_batch, reward_batch, mask_batch):
-        for s, a, r, m in zip(state_batch, action_batch, reward_batch, mask_batch):
-            self.memory.add(s, a, r, m)
-
-        self.t_step += 1
-        if self.t_step % self.update_every == 0 and len(self.memory) > self.batch_size:
-            experiences = self.memory.sample()
-            return self.learn(experiences)
-        return None
+        self.qnetwork_target = POMO_Network(
+            state_size=state_size,
+            action_size=action_size,
+            feature_size=layer_size,
+            hidden_dim=layer_size,
+            use_batchnorm=use_batchnorm,
+            seed=seed
+        ).to(device)
 
 
 ### Decision Transformer
