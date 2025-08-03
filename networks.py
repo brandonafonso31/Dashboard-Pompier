@@ -244,16 +244,30 @@ class FPN(nn.Module):
         
         return taus, taus_, entropy
     
-class POMO(nn.Module):
-    def __init__(self, input_dim, hidden_dim, pomo_size):
+class POMO_Network(nn.Module):
+    def __init__(self, state_size, action_size, feature_size, layer_size, use_batchnorm, seed):
         super().__init__()
-        self.pomo_size = pomo_size
+        self.seed = torch.manual_seed(seed)
+
+        self.state_size = state_size
+        self.action_size = action_size
+        self.feature_size = feature_size
+        self.hidden_dim = layer_size
+        self.use_batchnorm = use_batchnorm
+
+        # Encoder simple
         self.encoder = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
+            nn.Linear(self.state_size, self.hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim)
+            nn.Linear(self.hidden_dim, self.hidden_dim)
         )
-        self.decoder = nn.Linear(hidden_dim, 1)
+
+        # Optional BatchNorm
+        if self.use_batchnorm:
+            self.encoder.add_module("batch_norm", nn.BatchNorm1d(self.hidden_dim))
+
+        # Decoder simple
+        self.decoder = nn.Linear(self.hidden_dim, self.action_size)
         
     def forward(self, x):
         # x shape: (batch, n_nodes, input_dim)
