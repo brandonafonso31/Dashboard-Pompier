@@ -784,7 +784,7 @@ def filter_q_values(q_list, potential_actions):
 
 # POMO
 class POMO_Agent():
-    def __init__(self, state_size, action_size, layer_size, num_layers, use_batchnorm, device, seed):
+    def __init__(self, state_size, action_size, layer_size, num_layers, use_batchnorm, device, seed, lr = 0.001):
         """
         Args:
             state_size: Dimension de l'espace d'état
@@ -794,6 +794,7 @@ class POMO_Agent():
             use_batchnorm: Booléen pour l'utilisation de BatchNorm
             device: Device PyTorch (cuda/cpu)
             seed: Seed pour la reproductibilité
+            lr: lerning rate pour l'optimiseur Adam
         """
         self.state_size = state_size
         self.action_size = action_size
@@ -805,16 +806,16 @@ class POMO_Agent():
 
         # Initialisation des réseaux (version unifiée)
         network_args = {
-            'state_size': state_size,
-            'action_size': action_size,
-            'layer_size': layer_size,
-            'num_layers': num_layers,
-            'use_batchnorm': use_batchnorm,
-            'seed': seed
+            "state_size": state_size,
+            "action_size": action_size,
+            "layer_size": layer_size,
+            "num_layers": num_layers,
+            "use_batchnorm": use_batchnorm,
+            "seed": seed
         }
 
-        self.network = POMO_Network(**network_args)
-
+        self.network = POMO_Network(**network_args).to(device)
+        self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
 
 ### Decision Transformer
 
