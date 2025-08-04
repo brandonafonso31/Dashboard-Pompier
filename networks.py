@@ -245,38 +245,51 @@ class FPN(nn.Module):
         return taus, taus_, entropy
     
 class POMO_Network(nn.Module):
-    def __init__(self, state_size, action_size, layer_size, num_layers, use_batchnorm, seed):
+    def __init__(self, node_feature_size, hidden_size, num_layers, use_batchnorm, seed):
         super().__init__()
         self.seed = torch.manual_seed(seed)
+        self.hidden_size = hidden_size  # On stocke hidden_size comme attribut
         
-        # Construction dynamique des couches
-        layers = []
-        input_dim = state_size
+        # Encoder pour chaque ville (2D coord → hidden_dim)
+        self.node_encoder = nn.Sequential(
+            nn.Linear(node_feature_size, hidden_size),
+            nn.ReLU(),
+            nn.BatchNorm1d(hidden_size) if use_batchnorm else nn.Identity(),
+        )
         
-        for _ in range(num_layers):
-            layers.extend([
-                nn.Linear(input_dim, layer_size),
-                nn.ReLU()
-            ])
-            if use_batchnorm:
-                layers.append(nn.BatchNorm1d(layer_size))
-            input_dim = layer_size  # Les couches suivantes prennent layer_size en entrée
-
-        self.encoder = nn.Sequential(*layers)
-        self.decoder = nn.Linear(layer_size, action_size)  # Couche de sortie
-
-    def forward(self, x, mask_batch=None):
+        # Mécanisme d'attention
+        self.query = nn.Linear(hidden_size, hidden_size)
+        self.key = nn.Linear(hidden_size, hidden_size)
+        self.value = nn.Linear(hidden_size, hidden_size)
+        
+    def forward(self, coords, mask=None):
         """
         Args:
-            x: [B, state_size]
-            mask_batch: [B, action_size] or None
+            coords: [batch, num_nodes, 2]
+            mask: [batch, num_nodes] 
         Returns:
-            logits: [B, action_size]
+            logits: [batch, num_nodes]
         """
-        x = self.encoder(x)  # [B, hidden_dim]
-        logits = self.decoder(x)  # [B, action_size]
-
-        if mask_batch is not None:
-            logits = logits + mask_batch  # ajouter -inf aux actions interdites
-
+        batch_size, num_nodes, _ = coords.shape
+        
+        # Encode chaque ville
+        node_embeds = self.node_encoder(coords.view(-1, 2)).view(batch_size, num_nodes, -1)
+        
+        # Self-attention
+        q = self.query(node_embeds)
+        k = self.key(node_embeds)
+        v = self.value(node_embeds)
+        
+        # Scores d'attention avec scaling
+        attn_scores = torch.matmul(q, k.transpose(1, 2)) / (self.hidden_size ** 0.5)
+        
+        if mask is not None:
+            attn_scores = attn_scores + mask.unsqueeze(1)
+        
+        attn_probs = torch.softmax(attn_scores, dim=-1)
+        context = torch.matmul(attn_probs, v)
+        
+        # Logits (simplifié)
+        logits = context.sum(dim=-1)
+        
         return logits
