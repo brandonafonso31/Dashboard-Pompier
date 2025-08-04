@@ -783,7 +783,7 @@ def filter_q_values(q_list, potential_actions):
         return 79
 
 # POMO
-class POMO_Agent:
+class POMO_Agent():
     def __init__(self, state_size, action_size, layer_size, num_layers, use_batchnorm, device, seed):
         """
         Args:
