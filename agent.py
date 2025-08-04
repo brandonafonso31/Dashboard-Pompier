@@ -784,7 +784,7 @@ def filter_q_values(q_list, potential_actions):
 
 # POMO
 class POMO_Agent:
-    def __init__(self, state_size, action_size, layer_size, num_layers, use_batchnorm, device, seed, **kwargs):
+    def __init__(self, state_size, action_size, layer_size, num_layers, use_batchnorm, device, seed):
         """
         Args:
             state_size: Dimension de l'espace d'état
@@ -807,14 +807,13 @@ class POMO_Agent:
         network_args = {
             'state_size': state_size,
             'action_size': action_size,
-            'layer_size': layer_size,  # À utiliser au lieu de hidden_dim
+            'layer_size': layer_size,
             'num_layers': num_layers,
             'use_batchnorm': use_batchnorm,
             'seed': seed
         }
 
-        self.qnetwork_local = POMO_Network(**network_args).to(device)
-        self.qnetwork_target = POMO_Network(**network_args).to(device)
+        self.network = POMO_Network(**network_args)
 
 
 ### Decision Transformer
