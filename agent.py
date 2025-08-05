@@ -798,17 +798,27 @@ class POMO_Agent():
 
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=lr)
 
-    def act(self, state_tensor, mask_tensor):
-        """
-        state_tensor: [B, state_size]  (float)
-        mask_tensor: [B, action_size]  (float: 0 or -inf)
-        """
-        self.qnetwork_local.eval()
+    def act(self, state, all_ff_waiting=False, eps=None, pomo_size=8):
+        """Version qui exploite les multiples trajectoires de POMO"""
+        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # [1, state_size]
+        state_tensor = state_tensor.expand(pomo_size, -1)  # [pomo_size, state_size]
+        
+        # Créer un masque (à adapter)
+        mask = torch.zeros(pomo_size, self.qnetwork_local.action_size).to(self.device)
+        
         with torch.no_grad():
-            probs = self.qnetwork_local(state_tensor.to(self.device), mask_tensor.to(self.device))
+            logits = self.qnetwork_local(state_tensor, mask)  # [pomo_size, action_size]
+            probs = torch.softmax(logits, dim=-1)
+            
+            # Échantillonner une action par trajectoire
             m = torch.distributions.Categorical(probs)
-            action = m.sample()  # [B]
-        return action.cpu().numpy()
+            actions = m.sample()  # [pomo_size]
+            
+            # Choisir l'action avec la plus haute probabilité moyenne
+            unique_actions, counts = torch.unique(actions, return_counts=True)
+            best_action = unique_actions[torch.argmax(counts)].item()
+            
+        return best_action, 0  # Retourne l'action la plus fréquente
 
     def step(self, states, actions, rewards, masks):
         """
