@@ -245,48 +245,45 @@ class FPN(nn.Module):
         return taus, taus_, entropy
 
 class POMO_Network(nn.Module):
-    def __init__(self, node_feature_size, hidden_size, num_layers, use_batchnorm, seed, action_size):
+    def __init__(self, action_size, hidden_size, num_layers, use_batchnorm, seed):
         super().__init__()
         self.seed = torch.manual_seed(seed)
+        self.hidden_size = hidden_size
         self.action_size = action_size
         
-        # Initialisation soigneuse des poids
-        def init_weights(m):
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                nn.init.constant_(m.bias, 0.1)
+        # Encoder : chaque nœud est encodé individuellement
+        self.encoder = nn.Sequential(
+            nn.Linear(action_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size)
+        )
         
-        # Architecture avec normalisation et dropout
-        layers = []
-        input_dim = node_feature_size
+        # Optional BatchNorm
+        if use_batchnorm:
+            self.encoder.add_module("batch_norm", nn.BatchNorm1d(hidden_size))
         
-        for i in range(num_layers):
-            layers.append(nn.Linear(input_dim, hidden_size))
-            layers.append(nn.LayerNorm(hidden_size))
-            layers.append(nn.Dropout(0.1))
-            layers.append(nn.ReLU())
-            input_dim = hidden_size
+        # Décodeur : simple tête linéaire
+        self.decoder = nn.Linear(hidden_size, 1)  # Produira un score par nœud
+
+    def forward(self, node_feats, mask=None):
+        """
+        node_feats: [B, N, 2]  ← coordonnées (x, y)
+        mask: [B, N] ← -inf pour nœuds déjà visités
+        """
+        B, N, _ = node_feats.size()
         
-        self.encoder = nn.Sequential(*layers)
-        self.encoder.apply(init_weights)
-        
-        self.decoder = nn.Linear(hidden_size, action_size)
-        nn.init.xavier_uniform_(self.decoder.weight)
-        nn.init.constant_(self.decoder.bias, 0.1)
-        
-    def forward(self, x, mask=None):
-        # Normalisation préalable des inputs
-        x = x.float()
-        x_mean = x.mean(dim=-1, keepdim=True)
-        x_std = x.std(dim=-1, keepdim=True)
-        x = (x - x_mean) / (x_std + 1e-6)
-        
-        # Forward pass
-        x = self.encoder(x)
-        logits = self.decoder(x)
-        
-        # Masquage et stabilisation numérique
+        # Encodeur
+        node_embeds = self.encoder(node_feats.view(B * N, -1))  # [B*N, H]
+        node_embeds = node_embeds.view(B, N, -1)  # [B, N, H]
+
+        # Décodeur : score pour chaque nœud
+        scores = self.decoder(node_embeds).squeeze(-1)  # [B, N]
+
+        # Appliquer le masque
         if mask is not None:
-            logits = logits.masked_fill(mask.bool(), -1e9)
-        
-        return logits
+            scores = scores + mask  # masque doit contenir -inf pour les nœuds masqués
+
+        # Distribution de probas
+        probs = torch.softmax(scores, dim=-1)  # [B, N]
+
+        return probs
