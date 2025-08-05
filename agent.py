@@ -803,7 +803,7 @@ class POMO_Agent():
         state_tensor: [B, state_size]  (float)
         mask_tensor: [B, action_size]  (float: 0 or -inf)
         """
-        self.network.eval()
+        self.qnetwork_local.eval()
         with torch.no_grad():
             probs = self.qnetwork_local(state_tensor.to(self.device), mask_tensor.to(self.device))
             m = torch.distributions.Categorical(probs)
