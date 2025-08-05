@@ -250,26 +250,39 @@ class POMO_Network(nn.Module):
         self.seed = torch.manual_seed(seed)
         self.hidden_size = hidden_size
         
-        # Encoder: Map input features to hidden size
+        # Encoder avec le bon input_size
         self.encoder = nn.Sequential(
             nn.Linear(input_size, hidden_size),
             nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size)
+            *[nn.Sequential(
+                nn.Linear(hidden_size, hidden_size),
+                nn.ReLU()
+              ) for _ in range(num_layers-1)]
         )
         
         if use_batchnorm:
             self.encoder.add_module("batch_norm", nn.BatchNorm1d(hidden_size))
         
-        # Decoder: Map hidden size to 1 (score per node)
-        self.decoder = nn.Linear(hidden_size, 1)
+        # Decoder
+        self.decoder = nn.Linear(hidden_size, 1)  # 1 score par nœud
 
     def forward(self, node_feats, mask=None):
-        B, N, _ = node_feats.size()
-        node_embeds = self.encoder(node_feats.view(B * N, -1))  # [B*N, H]
-        node_embeds = node_embeds.view(B, N, -1)  # [B, N, H]
-        scores = self.decoder(node_embeds).squeeze(-1)  # [B, N]
+        # Gestion des dimensions manquantes
+        if len(node_feats.shape) == 2:
+            node_feats = node_feats.unsqueeze(-1)  # [B,N] -> [B,N,1]
+        
+        B, N, H = node_feats.shape
+        print(f"Network input shape: {node_feats.shape}")  # Debug
+        
+        # Vérification de compatibilité
+        if H != self.encoder[0].in_features:
+            raise ValueError(f"Input feature size {H} != network input size {self.encoder[0].in_features}")
+        
+        # Processing
+        node_embeds = self.encoder(node_feats.view(B * N, -1)).view(B, N, -1)
+        scores = self.decoder(node_embeds).squeeze(-1)
         
         if mask is not None:
-            scores = scores + mask  # Apply mask
-        probs = torch.softmax(scores, dim=-1)  # [B, N]
-        return probs
+            scores = scores + mask
+            
+        return torch.softmax(scores, dim=-1)

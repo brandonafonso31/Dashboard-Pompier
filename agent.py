@@ -784,87 +784,126 @@ def filter_q_values(q_list, potential_actions):
 
 # POMO
 class POMO_Agent:
-    def __init__(self, action_size, layer_size, num_layers,
+    def __init__(self, state_size, action_size, layer_size, num_layers, 
                  use_batchnorm, device, seed, lr=0.0001, **kwargs):
+        """
+        Accepte tous les hyperparamètres du fichier de config
+        kwargs capture les paramètres non utilisés (pour éviter les erreurs)
+        """
         self.device = device
         self.seed = torch.manual_seed(seed)
-        self.action_size = action_size
+        self.action_size = action_size  # Conservé pour compatibilité
 
+        # Le réseau utilise state_size comme dimension d'entrée
         self.qnetwork_local = POMO_Network(
-            action_size=(action_size+2)*40,
+            input_size=state_size,  # Utilisation de state_size au lieu de action_size
             hidden_size=layer_size,
             num_layers=num_layers,
             use_batchnorm=use_batchnorm,
-            seed=seed,
+            seed=seed
         ).to(device)
 
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=lr)
 
     def act(self, state, all_ff_waiting=None, eps=0., pomo_size=8):
-        """
-        state: np.array or torch.Tensor of shape [N, H] or [B, N, H]
-        returns: action, skill_level
-        """
+        # Conversion et vérification des dimensions
         if isinstance(state, np.ndarray):
             state = torch.tensor(state, dtype=torch.float32)
-
-        state_tensor = state.to(self.device)
-        B, N, _ = state_tensor.shape
-
-        mask = torch.zeros(B, N, device=self.device)  # no mask by default
-
+        
+        state = state.to(self.device)
+        
+        # Ajout d'une dimension batch si nécessaire (B=1)
+        if len(state.shape) == 1:
+            state = state.unsqueeze(0)  # [N] -> [1, N]
+        if len(state.shape) == 2:
+            state = state.unsqueeze(-1)  # [B,N] -> [B,N,1]
+        
+        # Vérification finale des dimensions
+        if len(state.shape) != 3:
+            raise ValueError(f"State must have 3 dimensions [B,N,H], got {state.shape}")
+        
+        B, N, H = state.shape
+        print(f"Final state shape: {state.shape}")  # Debug
+        
+        # Suite du code original...
         self.qnetwork_local.eval()
         with torch.no_grad():
-            probs = self.qnetwork_local(state_tensor, mask)  # [B, N]
-
+            logits = self.qnetwork_local(state, mask=None)
+            
+            # Exploration: epsilon-greedy
             if eps > 0 and np.random.rand() < eps:
-                action = np.random.choice(N)
+                action = np.random.randint(0, N)
             else:
+                # Convert logits to probabilities
+                probs = torch.softmax(logits, dim=-1)  # [B, N]
+                
+                # Sample action (for single trajectory)
                 m = torch.distributions.Categorical(probs)
                 action = m.sample().item()
-
-        return action, 0  # skill_lvl = 0 (dummy)
-
-    def act(self, state, all_ff_waiting=None, eps=0., pomo_size=8):
-        if isinstance(state, np.ndarray):
-            state = torch.tensor(state, dtype=torch.float32)
-        state = state.to(self.device)
-        B, N, H = state.shape
-        print(B,N,H)
-        self.qnetwork_local.train()
-
+        
+        # Return action and dummy skill level
+        return action, 0
+    
+    def step(self, state, action, reward, next_state=None, done=None, masks=None):
+        """
+        Perform a training step with POMO's shared baseline.
+        
+        Args:
+            state: Current state [B, N, H]
+            action: Selected actions [B]
+            reward: Obtained rewards [B]
+            next_state: Next states (unused in POMO)
+            done: Done flags (unused in POMO)
+            masks: Optional masks for invalid actions [B, N]
+        
+        Returns:
+            loss: Computed policy gradient loss
+        """
+        # Conversion des entrées si nécessaire
         if isinstance(state, np.ndarray):
             state = torch.tensor(state, dtype=torch.float32)
         if isinstance(action, np.ndarray):
             action = torch.tensor(action, dtype=torch.long)
         if isinstance(reward, np.ndarray):
             reward = torch.tensor(reward, dtype=torch.float32)
-
+        
+        # Transfert sur le device
         state = state.to(self.device)
         action = action.to(self.device)
         reward = reward.to(self.device)
-
+        
+        # Initialisation du masque si non fourni
         if masks is None:
             masks = torch.zeros(state.size(0), self.action_size, device=self.device)
         else:
             masks = torch.tensor(masks, dtype=torch.float32).to(self.device)
-
+        
+        # Mode entraînement
+        self.qnetwork_local.train()
+        
+        # Forward pass
         logits = self.qnetwork_local(state, masks)  # [B, N]
-        log_probs = torch.log(logits + 1e-9)
-        selected_log_probs = log_probs.gather(1, action.unsqueeze(1)).squeeze(1)
-
-        baseline = reward.mean()
-        advantage = (reward - baseline).detach()
-
+        
+        # Calcul des log probabilités
+        log_probs = torch.log_softmax(logits, dim=-1)  # Plus stable que log(softmax())
+        selected_log_probs = log_probs.gather(1, action.unsqueeze(1)).squeeze(1)  # [B]
+        
+        # Baseline partagée POMO (moyenne des rewards du batch)
+        baseline = reward.mean()  # Différence clé avec REINFORCE classique
+        
+        # Calcul de l'avantage
+        advantage = (reward - baseline).detach()  # [B]
+        
+        # Loss avec baseline partagée
         loss = -(selected_log_probs * advantage).mean()
-
+        
+        # Backpropagation
         self.optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.qnetwork_local.parameters(), max_norm=1.0)
         self.optimizer.step()
-
+        
         return loss.item()
-
 
 ### Decision Transformer
 
