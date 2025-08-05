@@ -243,47 +243,50 @@ class FPN(nn.Module):
         assert entropy.shape == (q.shape[0], 1), "instead shape {}".format(entropy.shape)
         
         return taus, taus_, entropy
-    
+
 class POMO_Network(nn.Module):
     def __init__(self, node_feature_size, hidden_size, num_layers, use_batchnorm, seed, action_size):
         super().__init__()
         self.seed = torch.manual_seed(seed)
         self.action_size = action_size
         
-        # Couche de flatten si l'input est 2D/3D
-        self.flatten = nn.Flatten()
+        # Initialisation soigneuse des poids
+        def init_weights(m):
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                nn.init.constant_(m.bias, 0.1)
         
-        # Calcul de la taille après flatten
-        self.flat_size = node_feature_size  # À adapter selon votre structure
+        # Architecture avec normalisation et dropout
+        layers = []
+        input_dim = node_feature_size
         
-        # Couches fully-connected
-        self.layers = nn.Sequential(
-            nn.Linear(self.flat_size, hidden_size),
-            nn.ReLU(),
-            *[nn.Sequential(
-                nn.Linear(hidden_size, hidden_size),
-                nn.ReLU(),
-                nn.BatchNorm1d(hidden_size) if use_batchnorm else nn.Identity()
-            ) for _ in range(num_layers-1)]
-        )
+        for i in range(num_layers):
+            layers.append(nn.Linear(input_dim, hidden_size))
+            layers.append(nn.LayerNorm(hidden_size))
+            layers.append(nn.Dropout(0.1))
+            layers.append(nn.ReLU())
+            input_dim = hidden_size
         
-        # Couche de sortie
-        self.fc_out = nn.Linear(hidden_size, action_size)
+        self.encoder = nn.Sequential(*layers)
+        self.encoder.apply(init_weights)
+        
+        self.decoder = nn.Linear(hidden_size, action_size)
+        nn.init.xavier_uniform_(self.decoder.weight)
+        nn.init.constant_(self.decoder.bias, 0.1)
         
     def forward(self, x, mask=None):
-        # x: [B, H, W] ou [B, state_size]
-        orig_shape = x.shape
-        
-        # Flatten si nécessaire
-        if len(orig_shape) > 2:
-            x = self.flatten(x)  # [B, H*W]
+        # Normalisation préalable des inputs
+        x = x.float()
+        x_mean = x.mean(dim=-1, keepdim=True)
+        x_std = x.std(dim=-1, keepdim=True)
+        x = (x - x_mean) / (x_std + 1e-6)
         
         # Forward pass
-        x = self.layers(x)  # [B, hidden_size]
-        logits = self.fc_out(x)  # [B, action_size]
+        x = self.encoder(x)
+        logits = self.decoder(x)
         
-        # Appliquer le masque
+        # Masquage et stabilisation numérique
         if mask is not None:
-            logits = logits + mask  # mask: [B, action_size]
+            logits = logits.masked_fill(mask.bool(), -1e9)
         
         return logits

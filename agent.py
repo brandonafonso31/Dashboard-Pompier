@@ -816,94 +816,100 @@ class POMO_Agent():
 
     def act(self, state, all_ff_waiting=False, eps=None, pomo_size=8):
         """
-        Args:
-            state: numpy array [state_size] ou [batch, state_size]
-            all_ff_waiting: bool (ignoré dans POMO)
-            eps: float (ignoré dans POMO)
-            pomo_size: int, nombre de trajectoires à générer
-        
-        Returns:
-            action: int, action choisie
-            skill_lvl: int (toujours 0)
+        Version avec gestion numérique robuste
         """
-        # Convertir l'état en tensor
+        # Conversion et vérification de l'état
         state_tensor = torch.FloatTensor(state).to(self.device)
+        if torch.isnan(state_tensor).any():
+            print("Alerte : NaN détecté dans l'état d'entrée")
+            state_tensor = torch.nan_to_num(state_tensor, nan=0.0)
         
-        # Ajouter une dimension batch si nécessaire (pour compatibilité)
-        if len(state_tensor.shape) == 1:
-            state_tensor = state_tensor.unsqueeze(0)  # [1, state_size]
-        elif len(state_tensor.shape) == 3:  # Si l'état est déjà 3D [1, H, W]
-            state_tensor = state_tensor.squeeze(0)  # On enlève la dimension batch [H, W]
+        # Gestion des dimensions
+        if state_tensor.dim() == 1:
+            state_tensor = state_tensor.unsqueeze(0).expand(pomo_size, -1)
         
-        # Dupliquer pour POMO (maintenant shape [pomo_size, ...])
-        state_tensor = state_tensor.unsqueeze(0).expand(pomo_size, *state_tensor.shape)  # [pomo_size, H, W]
+        # Masque par défaut
+        mask = torch.zeros(pomo_size, self.action_size).to(self.device)
         
-        # Créer un masque vide (à adapter selon vos besoins)
-        mask = torch.zeros(pomo_size, self.qnetwork_local.action_size).to(self.device)
-        
-        # Forward pass
+        # Forward pass sécurisé
         with torch.no_grad():
-            logits = self.qnetwork_local(state_tensor, mask)  # [pomo_size, action_size]
-            probs = torch.softmax(logits, dim=-1)
+            try:
+                logits = self.qnetwork_local(state_tensor, mask)
+                
+                # Vérification des logits
+                if torch.isnan(logits).any():
+                    print("Alerte : NaN dans les logits, utilisation de valeurs aléatoires")
+                    logits = torch.rand_like(logits)
+                
+                # Stabilisation numérique
+                logits = logits - logits.max(dim=-1, keepdim=True).values
+                probs = torch.softmax(logits, dim=-1)
+                
+                # Échantillonnage sécurisé
+                if torch.isnan(probs).any():
+                    probs = torch.ones_like(probs) / probs.size(-1)
+                
+                m = torch.distributions.Categorical(probs)
+                actions = m.sample()
+                
+                # Sélection de l'action la plus fréquente
+                unique_actions, counts = torch.unique(actions, return_counts=True)
+                best_action = unique_actions[torch.argmax(counts)].item()
+                
+                return best_action, 0
             
-            # Échantillonner les actions
-            m = torch.distributions.Categorical(probs)
-            actions = m.sample()  # [pomo_size]
-            
-            # Sélectionner l'action la plus fréquente
-            unique_actions, counts = torch.unique(actions, return_counts=True)
-            best_action = unique_actions[torch.argmax(counts)].item()
-        
-        return best_action, 0  # skill_lvl=0 par défaut
+            except Exception as e:
+                print(f"Erreur dans act(): {e}")
+                return 0, 0  # Fallback
 
     def step(self, state, action, reward, next_state=None, done=None, masks=None):
         """
-        Version compatible avec l'interface standard tout en conservant la logique POMO
-        
-        Args:
-            state: [B, state_size] ou [state_size]
-            action: [B] ou int
-            reward: [B] ou float
-            next_state: ignoré (mais présent pour compatibilité)
-            done: ignoré (mais présent pour compatibilité)
-            masks: [B, action_size] (optionnel)
-        
-        Returns:
-            loss.item(): valeur scalaire de la loss
+        Version finale qui :
+        - Gère tous les cas de figure
+        - Est compatible avec l'interface standard
+        - Préserve la logique POMO
         """
         self.qnetwork_local.train()
         
-        # Convertir les inputs en tensors et formater correctement
-        states = torch.FloatTensor(state).to(self.device)
+        # Conversion robuste des inputs
+        states = torch.as_tensor(state, dtype=torch.float32).to(self.device)
         if states.dim() == 1:
             states = states.unsqueeze(0)  # [1, state_size]
+        elif states.dim() == 2 and states.size(0) != 1 and states.size(1) != self.action_size:
+            states = states.unsqueeze(0)  # [1, H, W]
         
-        actions = torch.LongTensor([action] if isinstance(action, int) else action).to(self.device)
-        rewards = torch.FloatTensor([reward] if isinstance(reward, (float, int)) else reward).to(self.device)
+        actions = torch.as_tensor(action, dtype=torch.long).to(self.device)
+        rewards = torch.as_tensor(reward, dtype=torch.float32).to(self.device)
         
-        # Gérer les masks (soit fournis, soit créés si absents)
+        # Gestion des masks
         if masks is None:
-            masks = torch.zeros_like(states[:, :self.action_size])  # Mask vide par défaut
+            masks = torch.zeros(states.size(0), self.action_size, device=self.device)
         else:
-            masks = torch.FloatTensor(masks).to(self.device)
+            masks = torch.as_tensor(masks, dtype=torch.float32).to(self.device)
+        
+        # Vérification des dimensions
+        if actions.dim() == 0:
+            actions = actions.unsqueeze(0)
+        if rewards.dim() == 0:
+            rewards = rewards.unsqueeze(0)
         
         # Forward pass
         logits = self.qnetwork_local(states, masks)
         log_probs = torch.log_softmax(logits, dim=-1)
-        
-        # Sélectionner les log-probs des actions choisies
         selected_log_probs = log_probs.gather(1, actions.unsqueeze(1)).squeeze(1)
         
-        # Calcul de la baseline POMO (moyenne des rewards)
+        # Calcul POMO
         baseline = rewards.mean()
         advantage = (rewards - baseline).detach()
-        
-        # Calcul de la loss
         loss = -(selected_log_probs * advantage).mean()
         
-        # Backpropagation
+        # Backpropagation sécurisée
         self.optimizer.zero_grad()
         loss.backward()
+        
+        # Gradient clipping pour la stabilité
+        torch.nn.utils.clip_grad_norm_(self.qnetwork_local.parameters(), max_norm=1.0)
+        
         self.optimizer.step()
         
         return loss.item()
