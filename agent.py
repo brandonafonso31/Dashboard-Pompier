@@ -785,69 +785,127 @@ def filter_q_values(q_list, potential_actions):
 # POMO
 class POMO_Agent():
     def __init__(self, state_size, action_size, layer_size, num_layers, use_batchnorm, device, seed, lr=0.001, **kwargs):
+        """
+        Args:
+            state_size: Dimension de l'état
+            action_size: Dimension de l'action
+            layer_size: Taille des couches cachées
+            num_layers: Nombre de couches cachées
+            use_batchnorm: Booléen pour l'utilisation de BatchNorm
+            device: Device PyTorch (cuda/cpu)
+            seed: Seed pour la reproductibilité
+            lr: Taux d'apprentissage
+            **kwargs: Paramètres supplémentaires ignorés
+        """
         self.device = device
-        self.seed = seed
+        self.seed = torch.manual_seed(seed)
+        self.action_size = action_size
 
+        # Ignorer les paramètres non utilisés (comme layer_type)
+        # mais conserver les autres paramètres nécessaires
         self.qnetwork_local = POMO_Network(
             node_feature_size=state_size,
             hidden_size=layer_size,
             num_layers=num_layers,
             use_batchnorm=use_batchnorm,
-            seed=seed
+            seed=seed,
+            action_size=action_size
         ).to(device)
 
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=lr)
 
     def act(self, state, all_ff_waiting=False, eps=None, pomo_size=8):
-        """Version qui exploite les multiples trajectoires de POMO"""
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # [1, state_size]
-        state_tensor = state_tensor.expand(pomo_size, -1)  # [pomo_size, state_size]
+        """
+        Args:
+            state: numpy array [state_size] ou [batch, state_size]
+            all_ff_waiting: bool (ignoré dans POMO)
+            eps: float (ignoré dans POMO)
+            pomo_size: int, nombre de trajectoires à générer
         
-        # Créer un masque (à adapter)
+        Returns:
+            action: int, action choisie
+            skill_lvl: int (toujours 0)
+        """
+        # Convertir l'état en tensor
+        state_tensor = torch.FloatTensor(state).to(self.device)
+        
+        # Ajouter une dimension batch si nécessaire (pour compatibilité)
+        if len(state_tensor.shape) == 1:
+            state_tensor = state_tensor.unsqueeze(0)  # [1, state_size]
+        elif len(state_tensor.shape) == 3:  # Si l'état est déjà 3D [1, H, W]
+            state_tensor = state_tensor.squeeze(0)  # On enlève la dimension batch [H, W]
+        
+        # Dupliquer pour POMO (maintenant shape [pomo_size, ...])
+        state_tensor = state_tensor.unsqueeze(0).expand(pomo_size, *state_tensor.shape)  # [pomo_size, H, W]
+        
+        # Créer un masque vide (à adapter selon vos besoins)
         mask = torch.zeros(pomo_size, self.qnetwork_local.action_size).to(self.device)
         
+        # Forward pass
         with torch.no_grad():
             logits = self.qnetwork_local(state_tensor, mask)  # [pomo_size, action_size]
             probs = torch.softmax(logits, dim=-1)
             
-            # Échantillonner une action par trajectoire
+            # Échantillonner les actions
             m = torch.distributions.Categorical(probs)
             actions = m.sample()  # [pomo_size]
             
-            # Choisir l'action avec la plus haute probabilité moyenne
+            # Sélectionner l'action la plus fréquente
             unique_actions, counts = torch.unique(actions, return_counts=True)
             best_action = unique_actions[torch.argmax(counts)].item()
-            
-        return best_action, 0  # Retourne l'action la plus fréquente
+        
+        return best_action, 0  # skill_lvl=0 par défaut
 
-    def step(self, states, actions, rewards, masks):
+    def step(self, state, action, reward, next_state=None, done=None, masks=None):
         """
-        states: [B, state_size]
-        actions: [B]
-        rewards: [B]
-        masks: [B, action_size]
+        Version compatible avec l'interface standard tout en conservant la logique POMO
+        
+        Args:
+            state: [B, state_size] ou [state_size]
+            action: [B] ou int
+            reward: [B] ou float
+            next_state: ignoré (mais présent pour compatibilité)
+            done: ignoré (mais présent pour compatibilité)
+            masks: [B, action_size] (optionnel)
+        
+        Returns:
+            loss.item(): valeur scalaire de la loss
         """
         self.qnetwork_local.train()
-
-        states = states.to(self.device)
-        masks = masks.to(self.device)
-        actions = actions.to(self.device)
-        rewards = rewards.to(self.device)
-
+        
+        # Convertir les inputs en tensors et formater correctement
+        states = torch.FloatTensor(state).to(self.device)
+        if states.dim() == 1:
+            states = states.unsqueeze(0)  # [1, state_size]
+        
+        actions = torch.LongTensor([action] if isinstance(action, int) else action).to(self.device)
+        rewards = torch.FloatTensor([reward] if isinstance(reward, (float, int)) else reward).to(self.device)
+        
+        # Gérer les masks (soit fournis, soit créés si absents)
+        if masks is None:
+            masks = torch.zeros_like(states[:, :self.action_size])  # Mask vide par défaut
+        else:
+            masks = torch.FloatTensor(masks).to(self.device)
+        
+        # Forward pass
         logits = self.qnetwork_local(states, masks)
         log_probs = torch.log_softmax(logits, dim=-1)
+        
+        # Sélectionner les log-probs des actions choisies
         selected_log_probs = log_probs.gather(1, actions.unsqueeze(1)).squeeze(1)
-
-        # Baseline: moyenne des rewards
+        
+        # Calcul de la baseline POMO (moyenne des rewards)
         baseline = rewards.mean()
         advantage = (rewards - baseline).detach()
-
+        
+        # Calcul de la loss
         loss = -(selected_log_probs * advantage).mean()
-
+        
+        # Backpropagation
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-
+        
         return loss.item()
 
 

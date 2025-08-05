@@ -245,51 +245,45 @@ class FPN(nn.Module):
         return taus, taus_, entropy
     
 class POMO_Network(nn.Module):
-    def __init__(self, node_feature_size, hidden_size, num_layers, use_batchnorm, seed):
+    def __init__(self, node_feature_size, hidden_size, num_layers, use_batchnorm, seed, action_size):
         super().__init__()
         self.seed = torch.manual_seed(seed)
-        self.hidden_size = hidden_size  # On stocke hidden_size comme attribut
+        self.action_size = action_size
         
-        # Encoder pour chaque ville (2D coord → hidden_dim)
-        self.node_encoder = nn.Sequential(
-            nn.Linear(node_feature_size, hidden_size),
+        # Couche de flatten si l'input est 2D/3D
+        self.flatten = nn.Flatten()
+        
+        # Calcul de la taille après flatten
+        self.flat_size = node_feature_size  # À adapter selon votre structure
+        
+        # Couches fully-connected
+        self.layers = nn.Sequential(
+            nn.Linear(self.flat_size, hidden_size),
             nn.ReLU(),
-            nn.BatchNorm1d(hidden_size) if use_batchnorm else nn.Identity(),
+            *[nn.Sequential(
+                nn.Linear(hidden_size, hidden_size),
+                nn.ReLU(),
+                nn.BatchNorm1d(hidden_size) if use_batchnorm else nn.Identity()
+            ) for _ in range(num_layers-1)]
         )
         
-        # Mécanisme d'attention
-        self.query = nn.Linear(hidden_size, hidden_size)
-        self.key = nn.Linear(hidden_size, hidden_size)
-        self.value = nn.Linear(hidden_size, hidden_size)
+        # Couche de sortie
+        self.fc_out = nn.Linear(hidden_size, action_size)
         
-    def forward(self, coords, mask=None):
-        """
-        Args:
-            coords: [batch, num_nodes, 2]
-            mask: [batch, num_nodes] 
-        Returns:
-            logits: [batch, num_nodes]
-        """
-        batch_size, num_nodes, _ = coords.shape
+    def forward(self, x, mask=None):
+        # x: [B, H, W] ou [B, state_size]
+        orig_shape = x.shape
         
-        # Encode chaque ville
-        node_embeds = self.node_encoder(coords.view(-1, 2)).view(batch_size, num_nodes, -1)
+        # Flatten si nécessaire
+        if len(orig_shape) > 2:
+            x = self.flatten(x)  # [B, H*W]
         
-        # Self-attention
-        q = self.query(node_embeds)
-        k = self.key(node_embeds)
-        v = self.value(node_embeds)
+        # Forward pass
+        x = self.layers(x)  # [B, hidden_size]
+        logits = self.fc_out(x)  # [B, action_size]
         
-        # Scores d'attention avec scaling
-        attn_scores = torch.matmul(q, k.transpose(1, 2)) / (self.hidden_size ** 0.5)
-        
+        # Appliquer le masque
         if mask is not None:
-            attn_scores = attn_scores + mask.unsqueeze(1)
-        
-        attn_probs = torch.softmax(attn_scores, dim=-1)
-        context = torch.matmul(attn_probs, v)
-        
-        # Logits (simplifié)
-        logits = context.sum(dim=-1)
+            logits = logits + mask  # mask: [B, action_size]
         
         return logits
