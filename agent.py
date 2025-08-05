@@ -802,14 +802,11 @@ class POMO_Agent:
 
     def act(self, state, all_ff_waiting=None, eps=0., pomo_size=8):
         """
-        state: np.array or torch.Tensor of shape [N, 2] or [B, N, 2]
+        state: np.array or torch.Tensor of shape [N, H] or [B, N, H]
         returns: action, skill_level
         """
         if isinstance(state, np.ndarray):
             state = torch.tensor(state, dtype=torch.float32)
-
-        if state.dim() == 2:  # [N, 2]
-            state = state.unsqueeze(0)  # [1, N, 2]
 
         state_tensor = state.to(self.device)
         B, N, _ = state_tensor.shape
@@ -828,13 +825,12 @@ class POMO_Agent:
 
         return action, 0  # skill_lvl = 0 (dummy)
 
-    def step(self, state, action, reward, next_state=None, done=None, masks=None):
-        """
-        state: [B, N, H]
-        action: [B]
-        reward: [B]
-        masks: [B, N]
-        """
+    def act(self, state, all_ff_waiting=None, eps=0., pomo_size=8):
+        if isinstance(state, np.ndarray):
+            state = torch.tensor(state, dtype=torch.float32)
+        state = state.to(self.device)
+        B, N, H = state.shape
+        print(B,N,H)
         self.qnetwork_local.train()
 
         if isinstance(state, np.ndarray):

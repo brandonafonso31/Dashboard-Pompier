@@ -245,45 +245,31 @@ class FPN(nn.Module):
         return taus, taus_, entropy
 
 class POMO_Network(nn.Module):
-    def __init__(self, action_size, hidden_size, num_layers, use_batchnorm, seed):
+    def __init__(self, input_size, hidden_size, num_layers, use_batchnorm, seed):
         super().__init__()
         self.seed = torch.manual_seed(seed)
         self.hidden_size = hidden_size
-        self.action_size = action_size
         
-        # Encoder : chaque nœud est encodé individuellement
+        # Encoder: Map input features to hidden size
         self.encoder = nn.Sequential(
-            nn.Linear(action_size, hidden_size),
+            nn.Linear(input_size, hidden_size),
             nn.ReLU(),
             nn.Linear(hidden_size, hidden_size)
         )
         
-        # Optional BatchNorm
         if use_batchnorm:
             self.encoder.add_module("batch_norm", nn.BatchNorm1d(hidden_size))
         
-        # Décodeur : simple tête linéaire
-        self.decoder = nn.Linear(hidden_size, 1)  # Produira un score par nœud
+        # Decoder: Map hidden size to 1 (score per node)
+        self.decoder = nn.Linear(hidden_size, 1)
 
     def forward(self, node_feats, mask=None):
-        """
-        node_feats: [B, N, 2]  ← coordonnées (x, y)
-        mask: [B, N] ← -inf pour nœuds déjà visités
-        """
         B, N, _ = node_feats.size()
-        
-        # Encodeur
         node_embeds = self.encoder(node_feats.view(B * N, -1))  # [B*N, H]
         node_embeds = node_embeds.view(B, N, -1)  # [B, N, H]
-
-        # Décodeur : score pour chaque nœud
         scores = self.decoder(node_embeds).squeeze(-1)  # [B, N]
-
-        # Appliquer le masque
+        
         if mask is not None:
-            scores = scores + mask  # masque doit contenir -inf pour les nœuds masqués
-
-        # Distribution de probas
+            scores = scores + mask  # Apply mask
         probs = torch.softmax(scores, dim=-1)  # [B, N]
-
         return probs
