@@ -788,7 +788,7 @@ class POMO_Agent():
         self.device = device
         self.seed = seed
         
-        self.network = POMO_Network(
+        self.qnetwork_local = POMO_Network(
             node_feature_size=node_feature_size,  # 2 pour (x,y)
             hidden_size=hidden_size,
             num_layers=num_layers,
@@ -796,7 +796,49 @@ class POMO_Agent():
             seed=seed
         ).to(device)
         
-        self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
+        self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=lr)
+    
+    def act(self, state_tensor, mask_tensor):
+        """
+        state_tensor: [B, state_size]  (float)
+        mask_tensor: [B, action_size]  (float: 0 or -inf)
+        """
+        self.network.eval()
+        with torch.no_grad():
+            probs = self.qnetwork_local(state_tensor.to(self.device), mask_tensor.to(self.device))
+            m = torch.distributions.Categorical(probs)
+            action = m.sample()  # [B]
+        return action.cpu().numpy()
+    
+    def step(self, states, actions, rewards, masks):
+        """
+        states: [B, state_size]
+        actions: [B]
+        rewards: [B]
+        masks: [B, action_size]
+        """
+        self.qnetwork_local.train()
+
+        states = states.to(self.device)
+        masks = masks.to(self.device)
+        actions = actions.to(self.device)
+        rewards = rewards.to(self.device)
+
+        logits = self.qnetwork_local(states, masks)
+        log_probs = torch.log_softmax(logits, dim=-1)
+        selected_log_probs = log_probs.gather(1, actions.unsqueeze(1)).squeeze(1)
+
+        # Baseline: moyenne des rewards
+        baseline = rewards.mean()
+        advantage = (rewards - baseline).detach()
+
+        loss = -(selected_log_probs * advantage).mean()
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return loss.item()
 
 ### Decision Transformer
 
