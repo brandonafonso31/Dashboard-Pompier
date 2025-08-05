@@ -784,20 +784,20 @@ def filter_q_values(q_list, potential_actions):
 
 # POMO
 class POMO_Agent():
-    def __init__(self, node_feature_size, hidden_size, num_layers, use_batchnorm, device, seed, lr=0.001):
+    def __init__(self, state_size, action_size, layer_size, num_layers, use_batchnorm, device, seed, lr=0.001, **kwargs):
         self.device = device
         self.seed = seed
-        
+
         self.qnetwork_local = POMO_Network(
-            node_feature_size=node_feature_size,  # 2 pour (x,y)
-            hidden_size=hidden_size,
+            node_feature_size=state_size,
+            hidden_size=layer_size,
             num_layers=num_layers,
             use_batchnorm=use_batchnorm,
             seed=seed
         ).to(device)
-        
+
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=lr)
-    
+
     def act(self, state_tensor, mask_tensor):
         """
         state_tensor: [B, state_size]  (float)
@@ -809,7 +809,7 @@ class POMO_Agent():
             m = torch.distributions.Categorical(probs)
             action = m.sample()  # [B]
         return action.cpu().numpy()
-    
+
     def step(self, states, actions, rewards, masks):
         """
         states: [B, state_size]
@@ -839,6 +839,7 @@ class POMO_Agent():
         self.optimizer.step()
 
         return loss.item()
+
 
 ### Decision Transformer
 
