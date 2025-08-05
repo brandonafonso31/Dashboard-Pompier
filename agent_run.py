@@ -52,6 +52,7 @@ if __name__ == "__main__":
     elif args.agent_model == "pomo":
         agent = POMO_Agent(**hyper_params)
     print("Agent", args.agent_model, "initialized", flush=True)
+    print(agent.qnetwork_local)
 
     if args.train:
         if args.load:

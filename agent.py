@@ -830,7 +830,7 @@ class POMO_Agent:
 
     def step(self, state, action, reward, next_state=None, done=None, masks=None):
         """
-        state: [B, N, 2]
+        state: [B, N, H]
         action: [B]
         reward: [B]
         masks: [B, N]
