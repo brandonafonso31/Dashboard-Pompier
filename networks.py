@@ -257,7 +257,7 @@ class POMO_Network(nn.Module):
             layers.append(nn.Linear(input_dim, hidden_size))
             layers.append(nn.ReLU())
             if use_batchnorm:
-                layers.append(nn.BatchNorm1d(hidden_size))
+                layers.append(nn.LayerNorm(hidden_size))
             input_dim = hidden_size
 
         self.encoder = nn.Sequential(*layers)

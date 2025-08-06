@@ -836,7 +836,10 @@ class POMO_Agent:
         # state: [state_size], action: int, reward: float
         self.qnetwork_local.train()
 
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # [1, state_size]
+        if isinstance(state, np.ndarray):
+            state_tensor = torch.tensor(state, dtype=torch.float32).flatten().unsqueeze(0).to(self.device)
+        else:   
+            state_tensor = state.flatten().unsqueeze(0).to(self.device)
         action_tensor = torch.tensor([action], dtype=torch.long, device=self.device)
         reward_tensor = torch.tensor([reward], dtype=torch.float32, device=self.device)
 
