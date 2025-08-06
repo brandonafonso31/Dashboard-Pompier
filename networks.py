@@ -251,25 +251,24 @@ class POMO_Network(nn.Module):
         self.action_size = action_size
 
         layers = []
-        input_dim = state_size  # Should match the full flattened state dim: N_nodes * 2, e.g., 80 * 2 = 160
+        input_dim = state_size
 
         for _ in range(num_layers):
             layers.append(nn.Linear(input_dim, hidden_size))
             layers.append(nn.ReLU())
             if use_batchnorm:
-                layers.append(nn.LayerNorm(hidden_size))
+                layers.append(nn.BatchNorm1d(hidden_size))
             input_dim = hidden_size
 
         self.encoder = nn.Sequential(*layers)
         self.decoder = nn.Linear(hidden_size, action_size)
 
     def forward(self, x, mask=None):
-        # x: [B, state_size]
         x = x.float()
-        x = self.encoder(x)        # [B, hidden_size]
-        logits = self.decoder(x)   # [B, action_size]
+        x = self.encoder(x)     
+        logits = self.decoder(x) 
 
         if mask is not None:
-            logits = logits + mask  # Masking invalid actions
+            logits = logits + mask
 
-        return logits  # raw scores (logits)
+        return logits
