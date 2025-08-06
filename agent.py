@@ -809,62 +809,80 @@ class POMO_Agent:
         self.trajectory_rewards = []
 
     def act(self, state, all_ff_waiting=None, eps=0.):
-        # Récupérer les actions valides
+        # Obtenir les actions valides à ce moment
         potential_actions, _ = get_potential_actions(state, all_ff_waiting)
+        if len(potential_actions) == 0:
+            raise ValueError("Aucune action valide disponible")
 
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # [1, state_size]
-        if state_tensor.dim() == 3:
-            state_tensor = state_tensor.view(state_tensor.size(0), -1)
-
-        # Création du masque : 0 pour valides, -inf pour invalides
-        mask = torch.full((self.pomo_size, self.action_size), float('-inf')).to(self.device)
-        mask[:, potential_actions] = 0  # les actions valides ne sont pas masquées
+        # Conversion du state en Tensor [N, H] → [1, N, H]
+        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # [1, 82, 40]
+        
+        # Duplication pour POMO : [1, N, H] → [pomo_size, N, H]
+        state_tensor = state_tensor.expand(self.pomo_size, -1, -1)  # [8, 82, 40]
 
         self.qnetwork_local.eval()
         with torch.no_grad():
-            logits = self.qnetwork_local(state_tensor, mask)  # [pomo_size, action_size]
-            probs = torch.softmax(logits, dim=-1)
-            m = torch.distributions.Categorical(probs)
-            actions = m.sample()  # [pomo_size]
+            B, N, H = state_tensor.shape  # [8, 82, 40]
+            state_tensor_flat = state_tensor.view(B, -1)  # [8, 3280]
+            logits = self.qnetwork_local(state_tensor_flat)  # [8, action_size]
+            probs = torch.softmax(logits, dim=-1)       # [8, 82]
+            
+            # Masquage pour ne garder que les actions valides
+            probs_masked = probs.clone()
+            mask = torch.zeros_like(probs_masked)
+            mask[:, potential_actions] = 1
+            probs_masked *= mask
+            probs_masked = probs_masked / (probs_masked.sum(dim=1, keepdim=True) + 1e-8)  # normaliser
+            
+            # Échantillonnage pour chaque trajectoire
+            m = torch.distributions.Categorical(probs_masked)
+            actions = m.sample()  # [8]
 
         self.qnetwork_local.train()
 
-        # Stockage pour apprentissage
-        self.trajectory_states.append(state_tensor)
-        self.trajectory_actions.append(actions)
+        # Enregistrement des trajectoires
+        self.trajectory_states.append(state_tensor)  # [8, 82, 40]
+        self.trajectory_actions.append(actions)      # [8]
 
-        # Choix majoritaire
-        action_np = actions.cpu().numpy()
-        counts = np.bincount(action_np, minlength=self.action_size)
-        
-        # Filtrage pour ne pas retourner une action invalide
-        counts_masked = counts[potential_actions]
-        best_action_index = counts_masked.argmax()
-        best_action = potential_actions[best_action_index]
+        # Retourner l'action la plus fréquente
+        actions_np = actions.cpu().numpy()
+        best_action = max(set(actions_np), key=list(actions_np).count)
 
-        return best_action, 0
+        return best_action, 0  # skill_lvl est 0 par défaut ici
 
+    def step(self, old_state, action, reward, next_state=None, done=None):
+        # Format des entrées
+        if isinstance(old_state, np.ndarray):
+            old_state = torch.tensor(old_state, dtype=torch.float32)
+        if isinstance(action, np.ndarray):
+            action = torch.tensor(action, dtype=torch.long)
+        if isinstance(reward, np.ndarray) or not torch.is_tensor(reward):
+            reward = torch.tensor([reward], dtype=torch.float32)
 
-    def step(self, state, action, reward, next_state=None, done=None):
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-        if state_tensor.dim() == 3:
-            state_tensor = state_tensor.view(state_tensor.size(0), -1)
-        state_tensor = state_tensor.expand(self.pomo_size, -1)
+        # Reshape et device
+        state_tensor = old_state.to(self.device)
+        if state_tensor.ndim == 2:  # [N, H]
+            state_tensor = state_tensor.unsqueeze(0)  # [1, N, H]
+        B, N, H = state_tensor.shape
+        state_tensor = state_tensor.expand(self.pomo_size, N, H)  # [pomo_size, N, H]
+        state_tensor_flat = state_tensor.view(self.pomo_size, -1)  # [pomo_size, 3280]
 
+        # Actions & rewards
         action_tensor = torch.tensor([action] * self.pomo_size, dtype=torch.long, device=self.device)
-        reward_tensor = torch.tensor([reward] * self.pomo_size, dtype=torch.float32, device=self.device)
+        reward_tensor = reward.expand(self.pomo_size).to(self.device)
 
-        self.trajectory_states.append(state_tensor)
-        self.trajectory_actions.append(action_tensor)
-        self.trajectory_rewards.append(reward_tensor)
+        # Sauvegarde des trajectoires
+        self.trajectory_states.append(state_tensor_flat)  # [pomo_size, 3280]
+        self.trajectory_actions.append(action_tensor)     # [pomo_size]
+        self.trajectory_rewards.append(reward_tensor)     # [pomo_size]
 
-        # Lorsque trajectoire complète (selon ta logique)
-        if len(self.trajectory_states) >= 1:  # <-- à ajuster selon ton n_steps
-            states = torch.cat(self.trajectory_states, dim=0)
-            actions = torch.cat(self.trajectory_actions, dim=0)
-            rewards = torch.cat(self.trajectory_rewards, dim=0)
+        # Apprentissage si on atteint un batch complet
+        if len(self.trajectory_states) >= 1:
+            states = torch.cat(self.trajectory_states, dim=0)  # [B, 3280]
+            actions = torch.cat(self.trajectory_actions, dim=0)  # [B]
+            rewards = torch.cat(self.trajectory_rewards, dim=0)  # [B]
 
-            logits = self.qnetwork_local(states)
+            logits = self.qnetwork_local(states)  # [B, action_size]
             log_probs = torch.log_softmax(logits, dim=-1)
             selected_log_probs = log_probs.gather(1, actions.unsqueeze(1)).squeeze(1)
 
@@ -874,16 +892,18 @@ class POMO_Agent:
 
             self.optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.qnetwork_local.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(self.qnetwork_local.parameters(), max_norm=1.0)
             self.optimizer.step()
 
+            # Clear traj
             self.trajectory_states.clear()
             self.trajectory_actions.clear()
             self.trajectory_rewards.clear()
 
             return loss.item()
-        else:
-            return 0.0
+        
+        return 0.0
+
 
 
 ### Decision Transformer
