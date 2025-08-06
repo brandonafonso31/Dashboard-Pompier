@@ -802,16 +802,14 @@ class POMO_Agent:
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=lr)
 
     def act(self, state, all_ff_waiting=None, eps=0.):
-        # state: np.array [state_size], already flattened
-        if isinstance(state, np.ndarray):
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # [1, state_size]
-        else:
-            state_tensor = state.to(self.device).unsqueeze(0)
-
+        
+        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # [1, state_size]
+        if state.ndim == 2:
+            state_tensor = state_tensor.flatten().unsqueeze(0).to(self.device)
         self.qnetwork_local.eval()
         with torch.no_grad():
             logits = self.qnetwork_local(state_tensor)  # [1, action_size]
-            if eps > 0. and np.random.rand() < eps:
+            if np.random.uniform() > eps:
                 action = np.random.randint(0, self.action_size)
             else:
                 probs = torch.softmax(logits, dim=-1)
