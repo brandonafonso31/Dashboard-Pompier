@@ -809,40 +809,60 @@ class POMO_Agent:
         self.trajectory_rewards = []
 
     def act(self, state, all_ff_waiting=None, eps=0.):
+        # Récupérer les actions valides
         potential_actions, _ = get_potential_actions(state, all_ff_waiting)
 
         state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # [1, state_size]
-        state_tensor = state_tensor.expand(self.pomo_size, -1)  # [pomo_size, state_size]
+        if state_tensor.dim() == 3:
+            state_tensor = state_tensor.view(state_tensor.size(0), -1)
+
+        # Création du masque : 0 pour valides, -inf pour invalides
+        mask = torch.full((self.pomo_size, self.action_size), float('-inf')).to(self.device)
+        mask[:, potential_actions] = 0  # les actions valides ne sont pas masquées
 
         self.qnetwork_local.eval()
         with torch.no_grad():
-            logits = self.qnetwork_local(state_tensor)  # [pomo_size, action_size]
+            logits = self.qnetwork_local(state_tensor, mask)  # [pomo_size, action_size]
             probs = torch.softmax(logits, dim=-1)
             m = torch.distributions.Categorical(probs)
             actions = m.sample()  # [pomo_size]
 
         self.qnetwork_local.train()
 
-        # Store state/action for learning later
+        # Stockage pour apprentissage
         self.trajectory_states.append(state_tensor)
         self.trajectory_actions.append(actions)
 
-        # Return the most frequent action for interaction
+        # Choix majoritaire
         action_np = actions.cpu().numpy()
-        counts = np.bincount(action_np)
-        best_action = counts.argmax()
+        counts = np.bincount(action_np, minlength=self.action_size)
+        
+        # Filtrage pour ne pas retourner une action invalide
+        counts_masked = counts[potential_actions]
+        best_action_index = counts_masked.argmax()
+        best_action = potential_actions[best_action_index]
+
         return best_action, 0
 
-    def step(self, reward):
-        # Append rewards for all POMO samples
+
+    def step(self, state, action, reward, next_state=None, done=None):
+        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        if state_tensor.dim() == 3:
+            state_tensor = state_tensor.view(state_tensor.size(0), -1)
+        state_tensor = state_tensor.expand(self.pomo_size, -1)
+
+        action_tensor = torch.tensor([action] * self.pomo_size, dtype=torch.long, device=self.device)
         reward_tensor = torch.tensor([reward] * self.pomo_size, dtype=torch.float32, device=self.device)
+
+        self.trajectory_states.append(state_tensor)
+        self.trajectory_actions.append(action_tensor)
         self.trajectory_rewards.append(reward_tensor)
 
-        # Once we’ve collected all necessary POMO samples
-        if len(self.trajectory_states) >= 1:
-            states = torch.cat(self.trajectory_states, dim=0)  # [B, state_size]
-            actions = torch.cat(self.trajectory_actions, dim=0)  # [B]
-            rewards = torch.cat(self.trajectory_rewards, dim=0)  # [B]
+        # Lorsque trajectoire complète (selon ta logique)
+        if len(self.trajectory_states) >= 1:  # <-- à ajuster selon ton n_steps
+            states = torch.cat(self.trajectory_states, dim=0)
+            actions = torch.cat(self.trajectory_actions, dim=0)
+            rewards = torch.cat(self.trajectory_rewards, dim=0)
 
             logits = self.qnetwork_local(states)
             log_probs = torch.log_softmax(logits, dim=-1)
@@ -857,7 +877,6 @@ class POMO_Agent:
             torch.nn.utils.clip_grad_norm_(self.qnetwork_local.parameters(), 1.0)
             self.optimizer.step()
 
-            # Clear buffer after update
             self.trajectory_states.clear()
             self.trajectory_actions.clear()
             self.trajectory_rewards.clear()
