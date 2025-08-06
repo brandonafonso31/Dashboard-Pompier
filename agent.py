@@ -802,21 +802,35 @@ class POMO_Agent:
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=lr)
 
     def act(self, state, all_ff_waiting=None, eps=0.):
+        potential_actions, potential_skills = get_potential_actions(state, all_ff_waiting)
         
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # [1, state_size]
+        if len(potential_actions) == 0:
+            raise ValueError("No available actions found.")
+
+        # Conversion de l'état
+        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # [1, N, H] ou [1, state_size]
+
         if state.ndim == 2:
             state_tensor = state_tensor.flatten().unsqueeze(0).to(self.device)
+
+        mask = torch.full((self.action_size,), float('-inf'), device=self.device)
+        mask[potential_actions] = 0 
+
         self.qnetwork_local.eval()
         with torch.no_grad():
             logits = self.qnetwork_local(state_tensor)  # [1, action_size]
-            if np.random.uniform() > eps:
-                action = np.random.randint(0, self.action_size)
+            logits = logits + mask
+
+            if np.random.rand() < eps:
+                action = np.random.choice(potential_actions)
             else:
                 probs = torch.softmax(logits, dim=-1)
                 m = torch.distributions.Categorical(probs)
                 action = m.sample().item()
+        
+        self.qnetwork_local.train()
+        return action, 0
 
-        return action, 0  # No skill level
 
     def step(self, state, action, reward, next_state=None, done=None, masks=None):
         # state: [state_size], action: int, reward: float

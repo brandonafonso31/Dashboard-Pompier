@@ -537,9 +537,9 @@ if __name__ == "__main__":
                                             else:
                                                 loss = 0
                                             
-                                            print(eps)
+                                            print(all_ff_waiting)
                                             action, skill_lvl = agent.act(state, all_ff_waiting, eps)
-
+                                            print(f"ff_existing: {ff_existing} action: {action} skill_lvl: {skill_lvl}")
                                             # if all_ff_waiting:
                                                 # print("action", action)
     
