@@ -865,7 +865,7 @@ class POMO_Agent:
                                 dtype=torch.long, device=self.device)
         
         reward_tensor = torch.tensor(reward, dtype=torch.float32, device=self.device)
-        reward_tensor = reward_tensor.expand(self.pomo_size)  # [8]
+        reward_tensor = reward_tensor.expand(self.batch_size)  # [8]
 
         # Stockage cohérent
         self.trajectory_states.append(state_flat)
@@ -887,7 +887,7 @@ class POMO_Agent:
             
             # Calcul de la loss
             baseline = rewards.mean()
-            advantage = (rewards - baseline).detach().expand(self.batch_size)  # [64]
+            advantage = (rewards - baseline).detach() # [64]
             loss = -(selected_log_probs * advantage).mean()
             
             # Backpropagation
