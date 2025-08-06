@@ -865,7 +865,7 @@ class POMO_Agent:
                                 dtype=torch.long, device=self.device)
         
         reward_tensor = torch.tensor(reward, dtype=torch.float32, device=self.device)
-        reward_tensor = reward_tensor.expand(self.batch_size)  # [8]
+        reward_tensor = reward_tensor.expand(self.pomo_size)  # [8]
 
         # Stockage cohérent
         self.trajectory_states.append(state_flat)
@@ -877,7 +877,7 @@ class POMO_Agent:
             # Concaténation exacte
             states = torch.cat(self.trajectory_states)  # [64, 3280]
             actions = torch.cat(self.trajectory_actions)  # [64]
-            rewards = torch.cat(self.trajectory_rewards)  # actuellement [32]
+            rewards = torch.cat(self.trajectory_rewards)  # actuellement [64]
             
 
             # Forward pass
@@ -886,14 +886,16 @@ class POMO_Agent:
             selected_log_probs = log_probs.gather(1, actions.unsqueeze(1)).squeeze(1)  # [64]
             
             # Calcul de la loss
-            baseline = rewards.mean()
-            advantage = (rewards - baseline).detach() # [64]
+            baseline = rewards.mean()            
+            advantage = (rewards - baseline).detach() # [32]
+            scale = advantage.shape[0]//self.batch_size
+            advantage = advantage.repeat(scale) # [64]
             loss = -(selected_log_probs * advantage).mean()
             
             # Backpropagation
             self.optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.qnetwork_local.parameters(), 1.0)
+            clip_grad_norm_(self.qnetwork_local.parameters(), 1.0)
             self.optimizer.step()
             
             # Réinitialisation
