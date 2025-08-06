@@ -791,7 +791,7 @@ class POMO_Agent:
         self.seed = torch.manual_seed(seed)
         self.action_size = action_size
         self.pomo_size = pomo_size
-
+        self.batch_size = 64
         self.qnetwork_local = POMO_Network(
             state_size=state_size,
             hidden_size=layer_size,
@@ -841,9 +841,9 @@ class POMO_Agent:
         self.qnetwork_local.train()
 
         # Enregistrement des trajectoires
-        self.trajectory_states.append(state_tensor)  # [8, 82, 40]
-        self.trajectory_actions.append(actions)      # [8]
-
+        self.trajectory_states.append(state_tensor.view(self.pomo_size, -1))  # [8, 3280]
+        self.trajectory_actions.append(actions)  # [8]
+        
         # Retourner l'action la plus fréquente
         actions_np = actions.cpu().numpy()
         best_action = max(set(actions_np), key=list(actions_np).count)
@@ -851,68 +851,59 @@ class POMO_Agent:
         return best_action, 0  # skill_lvl est 0 par défaut ici
 
     def step(self, old_state, action, reward, next_state=None, done=None):
-        # Format des entrées
-        if isinstance(old_state, np.ndarray):
-            old_state = torch.tensor(old_state, dtype=torch.float32)
-        if isinstance(action, torch.Tensor):
-            action_val = action.item() if action.numel() == 1 else int(action[0])
-        else:
-            action_val = int(action)
-
-        action_tensor = torch.full((self.pomo_size,), action_val, dtype=torch.long, device=self.device)
-
-        if isinstance(reward, np.ndarray) or not torch.is_tensor(reward):
-            reward = torch.tensor([reward], dtype=torch.float32)
-
-        # Reshape et device
-        state_tensor = old_state.to(self.device)
-        if state_tensor.ndim == 2:  # [N, H]
+        # Conversion robuste des entrées
+        state_tensor = torch.as_tensor(old_state, dtype=torch.float32, device=self.device)
+        if state_tensor.ndim == 2:
             state_tensor = state_tensor.unsqueeze(0)  # [1, N, H]
-        B, N, H = state_tensor.shape
-        state_tensor = state_tensor.expand(self.pomo_size, N, H)  # [pomo_size, N, H]
-        state_tensor_flat = state_tensor.view(self.pomo_size, -1)  # [pomo_size, 3280]
+        
+        # Transformation pour POMO
+        state_flat = state_tensor.view(1, -1).expand(self.pomo_size, -1)  # [8, 3280]
+        
+        # Gestion des actions
+        action = int(action) if not isinstance(action, (int, torch.Tensor)) else action
+        action_tensor = torch.full((self.pomo_size,), action, 
+                                dtype=torch.long, device=self.device)
+        
+        reward_tensor = torch.tensor(reward, dtype=torch.float32, device=self.device)
+        reward_tensor = reward_tensor.expand(self.pomo_size)  # [8]
 
-        # Actions & rewards
-        action_tensor = torch.tensor([action] * self.pomo_size, dtype=torch.long, device=self.device)
-        reward_tensor = reward.expand(self.pomo_size).to(self.device)
+        # Stockage cohérent
+        self.trajectory_states.append(state_flat)
+        self.trajectory_actions.append(action_tensor)
+        self.trajectory_rewards.append(reward_tensor)
 
-        # Sauvegarde des trajectoires
-        self.trajectory_states.append(state_tensor_flat)  # [pomo_size, 3280]
-        self.trajectory_actions.append(action_tensor)     # [pomo_size]
-        self.trajectory_rewards.append(reward_tensor)     # [pomo_size]
-
-        # Apprentissage si on atteint un batch complet
-        if len(self.trajectory_states) >= 1:
-            states = torch.cat(self.trajectory_states, dim=0)  # [B, 3280]
-            actions = torch.cat(self.trajectory_actions, dim=0)  # [B]
-            rewards = torch.cat(self.trajectory_rewards, dim=0)  # [B]
-
-            logits = self.qnetwork_local(states)  # [B, action_size]
-            log_probs = torch.log_softmax(logits, dim=-1)
+        # Apprentissage seulement quand on a exactement un batch complet
+        if len(self.trajectory_states) == self.batch_size // self.pomo_size:
+            # Concaténation exacte
+            states = torch.cat(self.trajectory_states)  # [64, 3280]
+            actions = torch.cat(self.trajectory_actions)  # [64]
+            rewards = torch.cat(self.trajectory_rewards)  # actuellement [32]
             
-            print("log_probs shape:", log_probs.shape)
-            print("actions shape:", actions.shape)
-            selected_log_probs = log_probs.gather(1, actions.unsqueeze(1)).squeeze(1)
 
+            # Forward pass
+            logits = self.qnetwork_local(states)  # [64, action_size=80]
+            log_probs = torch.log_softmax(logits, dim=-1)
+            selected_log_probs = log_probs.gather(1, actions.unsqueeze(1)).squeeze(1)  # [64]
+            
+            # Calcul de la loss
             baseline = rewards.mean()
-            advantage = (rewards - baseline).detach()
+            advantage = (rewards - baseline).detach().expand(self.batch_size)  # [64]
             loss = -(selected_log_probs * advantage).mean()
-
+            
+            # Backpropagation
             self.optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(self.qnetwork_local.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(self.qnetwork_local.parameters(), 1.0)
             self.optimizer.step()
-
-            # Clear traj
+            
+            # Réinitialisation
             self.trajectory_states.clear()
             self.trajectory_actions.clear()
             self.trajectory_rewards.clear()
-
+            
             return loss.item()
         
         return 0.0
-
-
 
 ### Decision Transformer
 
