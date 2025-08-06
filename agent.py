@@ -786,124 +786,68 @@ def filter_q_values(q_list, potential_actions):
 class POMO_Agent:
     def __init__(self, state_size, action_size, layer_size, num_layers, 
                  use_batchnorm, device, seed, lr=0.0001, **kwargs):
-        """
-        Accepte tous les hyperparamètres du fichier de config
-        kwargs capture les paramètres non utilisés (pour éviter les erreurs)
-        """
         self.device = device
-        self.seed = torch.manual_seed(seed)
-        self.action_size = action_size  # Conservé pour compatibilité
+        self.action_size = action_size
+        torch.manual_seed(seed)
 
-        # Le réseau utilise state_size comme dimension d'entrée
         self.qnetwork_local = POMO_Network(
-            input_size=state_size,  # Utilisation de state_size au lieu de action_size
+            state_size=state_size,
             hidden_size=layer_size,
             num_layers=num_layers,
             use_batchnorm=use_batchnorm,
-            seed=seed
+            seed=seed,
+            action_size=action_size
         ).to(device)
 
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=lr)
 
-    def act(self, state, all_ff_waiting=None, eps=0., pomo_size=8):
-        # Conversion et vérification des dimensions
+    def act(self, state, all_ff_waiting=None, eps=0.):
+        # state: np.array [state_size], already flattened
         if isinstance(state, np.ndarray):
-            state = torch.tensor(state, dtype=torch.float32)
-        
-        state = state.to(self.device)
-        
-        # Ajout d'une dimension batch si nécessaire (B=1)
-        if len(state.shape) == 1:
-            state = state.unsqueeze(0)  # [N] -> [1, N]
-        if len(state.shape) == 2:
-            state = state.unsqueeze(-1)  # [B,N] -> [B,N,1]
-        
-        # Vérification finale des dimensions
-        if len(state.shape) != 3:
-            raise ValueError(f"State must have 3 dimensions [B,N,H], got {state.shape}")
-        
-        B, N, H = state.shape
-        print(f"Final state shape: {state.shape}")  # Debug
-        
-        # Suite du code original...
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # [1, state_size]
+        else:
+            state_tensor = state.to(self.device).unsqueeze(0)
+
         self.qnetwork_local.eval()
         with torch.no_grad():
-            logits = self.qnetwork_local(state, mask=None)
-            
-            # Exploration: epsilon-greedy
-            if eps > 0 and np.random.rand() < eps:
-                action = np.random.randint(0, N)
+            logits = self.qnetwork_local(state_tensor)  # [1, action_size]
+            if eps > 0. and np.random.rand() < eps:
+                action = np.random.randint(0, self.action_size)
             else:
-                # Convert logits to probabilities
-                probs = torch.softmax(logits, dim=-1)  # [B, N]
-                
-                # Sample action (for single trajectory)
+                probs = torch.softmax(logits, dim=-1)
                 m = torch.distributions.Categorical(probs)
                 action = m.sample().item()
-        
-        # Return action and dummy skill level
-        return action, 0
-    
+
+        return action, 0  # No skill level
+
     def step(self, state, action, reward, next_state=None, done=None, masks=None):
-        """
-        Perform a training step with POMO's shared baseline.
-        
-        Args:
-            state: Current state [B, N, H]
-            action: Selected actions [B]
-            reward: Obtained rewards [B]
-            next_state: Next states (unused in POMO)
-            done: Done flags (unused in POMO)
-            masks: Optional masks for invalid actions [B, N]
-        
-        Returns:
-            loss: Computed policy gradient loss
-        """
-        # Conversion des entrées si nécessaire
-        if isinstance(state, np.ndarray):
-            state = torch.tensor(state, dtype=torch.float32)
-        if isinstance(action, np.ndarray):
-            action = torch.tensor(action, dtype=torch.long)
-        if isinstance(reward, np.ndarray):
-            reward = torch.tensor(reward, dtype=torch.float32)
-        
-        # Transfert sur le device
-        state = state.to(self.device)
-        action = action.to(self.device)
-        reward = reward.to(self.device)
-        
-        # Initialisation du masque si non fourni
-        if masks is None:
-            masks = torch.zeros(state.size(0), self.action_size, device=self.device)
-        else:
-            masks = torch.tensor(masks, dtype=torch.float32).to(self.device)
-        
-        # Mode entraînement
+        # state: [state_size], action: int, reward: float
         self.qnetwork_local.train()
-        
-        # Forward pass
-        logits = self.qnetwork_local(state, masks)  # [B, N]
-        
-        # Calcul des log probabilités
-        log_probs = torch.log_softmax(logits, dim=-1)  # Plus stable que log(softmax())
-        selected_log_probs = log_probs.gather(1, action.unsqueeze(1)).squeeze(1)  # [B]
-        
-        # Baseline partagée POMO (moyenne des rewards du batch)
-        baseline = reward.mean()  # Différence clé avec REINFORCE classique
-        
-        # Calcul de l'avantage
-        advantage = (reward - baseline).detach()  # [B]
-        
-        # Loss avec baseline partagée
+
+        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # [1, state_size]
+        action_tensor = torch.tensor([action], dtype=torch.long, device=self.device)
+        reward_tensor = torch.tensor([reward], dtype=torch.float32, device=self.device)
+
+        if masks is not None:
+            mask_tensor = torch.tensor(masks, dtype=torch.float32, device=self.device).unsqueeze(0)  # [1, action_size]
+        else:
+            mask_tensor = torch.zeros(1, self.action_size, device=self.device)
+
+        logits = self.qnetwork_local(state_tensor, mask_tensor)
+        log_probs = torch.log_softmax(logits, dim=-1)
+        selected_log_probs = log_probs.gather(1, action_tensor.unsqueeze(1)).squeeze(1)
+
+        baseline = reward_tensor.mean()
+        advantage = (reward_tensor - baseline).detach()
         loss = -(selected_log_probs * advantage).mean()
-        
-        # Backpropagation
+
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.qnetwork_local.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(self.qnetwork_local.parameters(), 1.0)
         self.optimizer.step()
-        
+
         return loss.item()
+
 
 ### Decision Transformer
 

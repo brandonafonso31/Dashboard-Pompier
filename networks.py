@@ -245,44 +245,31 @@ class FPN(nn.Module):
         return taus, taus_, entropy
 
 class POMO_Network(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, use_batchnorm, seed):
+    def __init__(self, state_size, hidden_size, num_layers, use_batchnorm, seed, action_size):
         super().__init__()
-        self.seed = torch.manual_seed(seed)
-        self.hidden_size = hidden_size
-        
-        # Encoder avec le bon input_size
-        self.encoder = nn.Sequential(
-            nn.Linear(input_size, hidden_size),
-            nn.ReLU(),
-            *[nn.Sequential(
-                nn.Linear(hidden_size, hidden_size),
-                nn.ReLU()
-              ) for _ in range(num_layers-1)]
-        )
-        
-        if use_batchnorm:
-            self.encoder.add_module("batch_norm", nn.BatchNorm1d(hidden_size))
-        
-        # Decoder
-        self.decoder = nn.Linear(hidden_size, 1)  # 1 score par nœud
+        torch.manual_seed(seed)
+        self.action_size = action_size
 
-    def forward(self, node_feats, mask=None):
-        # Gestion des dimensions manquantes
-        if len(node_feats.shape) == 2:
-            node_feats = node_feats.unsqueeze(-1)  # [B,N] -> [B,N,1]
-        
-        B, N, H = node_feats.shape
-        print(f"Network input shape: {node_feats.shape}")  # Debug
-        
-        # Vérification de compatibilité
-        if H != self.encoder[0].in_features:
-            raise ValueError(f"Input feature size {H} != network input size {self.encoder[0].in_features}")
-        
-        # Processing
-        node_embeds = self.encoder(node_feats.view(B * N, -1)).view(B, N, -1)
-        scores = self.decoder(node_embeds).squeeze(-1)
-        
+        layers = []
+        input_dim = state_size  # Should match the full flattened state dim: N_nodes * 2, e.g., 80 * 2 = 160
+
+        for _ in range(num_layers):
+            layers.append(nn.Linear(input_dim, hidden_size))
+            layers.append(nn.ReLU())
+            if use_batchnorm:
+                layers.append(nn.BatchNorm1d(hidden_size))
+            input_dim = hidden_size
+
+        self.encoder = nn.Sequential(*layers)
+        self.decoder = nn.Linear(hidden_size, action_size)
+
+    def forward(self, x, mask=None):
+        # x: [B, state_size]
+        x = x.float()
+        x = self.encoder(x)        # [B, hidden_size]
+        logits = self.decoder(x)   # [B, action_size]
+
         if mask is not None:
-            scores = scores + mask
-            
-        return torch.softmax(scores, dim=-1)
+            logits = logits + mask  # Masking invalid actions
+
+        return logits  # raw scores (logits)
