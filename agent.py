@@ -877,9 +877,8 @@ class POMO_Agent:
             # Concaténation exacte
             states = torch.cat(self.trajectory_states)  # [64, 3280]
             actions = torch.cat(self.trajectory_actions)  # [64]
-            rewards = torch.cat(self.trajectory_rewards)  # actuellement [64]
+            rewards = torch.cat(self.trajectory_rewards)  # actuellement [32]
             
-
             # Forward pass
             logits = self.qnetwork_local(states)  # [64, action_size=80]
             log_probs = torch.log_softmax(logits, dim=-1)
@@ -888,8 +887,9 @@ class POMO_Agent:
             # Calcul de la loss
             baseline = rewards.mean()            
             advantage = (rewards - baseline).detach() # [32]
-            scale = advantage.shape[0]//self.batch_size
-            advantage = advantage.repeat(scale) # [64]
+            scale = advantage.size(0)//self.batch_size
+            
+            advantage = advantage.repeat(scale) # [32*scale = 64]
             loss = -(selected_log_probs * advantage).mean()
             
             # Backpropagation
