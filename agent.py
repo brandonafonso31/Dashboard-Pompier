@@ -854,8 +854,13 @@ class POMO_Agent:
         # Format des entrées
         if isinstance(old_state, np.ndarray):
             old_state = torch.tensor(old_state, dtype=torch.float32)
-        if isinstance(action, np.ndarray):
-            action = torch.tensor(action, dtype=torch.long)
+        if isinstance(action, torch.Tensor):
+            action_val = action.item() if action.numel() == 1 else int(action[0])
+        else:
+            action_val = int(action)
+
+        action_tensor = torch.full((self.pomo_size,), action_val, dtype=torch.long, device=self.device)
+
         if isinstance(reward, np.ndarray) or not torch.is_tensor(reward):
             reward = torch.tensor([reward], dtype=torch.float32)
 
@@ -884,6 +889,9 @@ class POMO_Agent:
 
             logits = self.qnetwork_local(states)  # [B, action_size]
             log_probs = torch.log_softmax(logits, dim=-1)
+            
+            print("log_probs shape:", log_probs.shape)
+            print("actions shape:", actions.shape)
             selected_log_probs = log_probs.gather(1, actions.unsqueeze(1)).squeeze(1)
 
             baseline = rewards.mean()
