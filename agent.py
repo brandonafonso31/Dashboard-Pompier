@@ -887,8 +887,7 @@ class POMO_Agent:
             # Calcul de la loss
             baseline = rewards.mean()            
             advantage = (rewards - baseline).detach() # [32]
-            scale = advantage.size(0)//self.batch_size
-            
+            scale = advantage.shape[0]//self.batch_size
             advantage = advantage.repeat(scale) # [32*scale = 64]
             loss = -(selected_log_probs * advantage).mean()
             
