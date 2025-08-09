@@ -785,7 +785,7 @@ def filter_q_values(q_list, potential_actions):
 # POMO
 class POMO_Agent:
     def __init__(self, state_size, action_size, layer_size, num_layers,
-                 use_batchnorm, device, seed, lr=0.0001, pomo_size=8, batch_size=64):
+                 use_batchnorm, device, seed, lr=0.0001, pomo_size=8, batch_size=64,**kwargs):
 
         self.device = device
         self.seed = torch.manual_seed(seed)
