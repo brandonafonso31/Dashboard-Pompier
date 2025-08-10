@@ -616,21 +616,20 @@ if __name__ == "__main__":
             print(num_inter, "Agent saved as", args.model_name, flush=True)
 
     if args.train:
-
         os.chdir('../SVG_model')   
         torch.save(agent.qnetwork_local.state_dict(), args.model_name)
         print("Agent saved as", args.model_name, flush=True)
-        print()
+
+        # Sauvegarde de l'évolution des rewards
+        os.chdir('../Plots')
+        pickle.dump(reward_evo, open(args.model_name + "_reward_evo.pkl", "wb"))
+        print("Reward evolution saved")
 
     else:
-
         os.chdir('../Plots')
-           
         pickle.dump(dic_indic, open(args.save_metrics_as + ".pkl", "wb"))
-    
-        os.chdir('../')
+        pickle.dump(reward_evo, open(args.model_name + "_reward_evo.pkl", "wb"))
+        print("Metrics and reward evolution saved")
 
-        print("Metrics saved", flush=True)
-        print()
 
 
