@@ -245,6 +245,7 @@ class FPN(nn.Module):
         return taus, taus_, entropy
 
 class POMO_Network(nn.Module):
+    """add transformers for embeddings and link between stats"""
     def __init__(self, state_size, hidden_size, num_layers, use_batchnorm, seed, action_size):
         super().__init__()
         torch.manual_seed(seed)
