@@ -784,7 +784,7 @@ def filter_q_values(q_list, potential_actions):
 
 # POMO
 class POMO_Agent:
-    """ focus 3 metriques : skill lvl, v1froms1, ff_sent"""
+    """ focus 3 metriques : skill_lvl, v_sent, ff_sent"""
     def __init__(self, state_size, action_size, layer_size, num_layers,
                  use_batchnorm, device, seed, lr=0.0001, pomo_size=3, batch_size=25, **kwargs):
 
