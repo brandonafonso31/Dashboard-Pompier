@@ -578,31 +578,64 @@ class DT_Network(nn.Module):
         return self.predict_action(x)
 
 class POMO_Network(nn.Module):
-    """add transformers for embeddings and link between stats"""
-    def __init__(self, state_size, hidden_size, num_layers, use_batchnorm, seed, action_size):
+    """Version améliorée de POMO_Network avec encodeurs type Decision Transformer"""
+    def __init__(self, feature_size, action_size, d_model=128, n_heads=4, num_layers=2, seed=0):
         super().__init__()
         torch.manual_seed(seed)
         self.action_size = action_size
+        self.feature_size = feature_size
+        self.d_model = d_model
 
-        layers = []
-        input_dim = state_size
+        # Encodeur pour la ligne info (1 ligne)
+        self.infos_encoder = nn.Sequential(
+            nn.Linear(self.feature_size, self.d_model),
+            nn.ReLU(),
+            nn.Linear(self.d_model, self.d_model)
+        )
 
-        for _ in range(num_layers):
-            layers.append(nn.Linear(input_dim, hidden_size))
-            layers.append(nn.ReLU())
-            if use_batchnorm:
-                layers.append(nn.BatchNorm1d(hidden_size))
-            input_dim = hidden_size
+        # Encodeur pour la ligne rôle (1 ligne)
+        self.role_encoder = nn.Sequential(
+            nn.Linear(self.feature_size, self.d_model),
+            nn.ReLU(),
+            nn.Linear(self.d_model, self.d_model)
+        )
 
-        self.encoder = nn.Sequential(*layers)
-        self.decoder = nn.Linear(hidden_size, action_size)
-        
-        # self.encoder = FirefighterEncoder(state_size,n_heads)
+        # Encodeur pour les pompiers (80 lignes)
+        self.ff_encoder = FirefighterEncoder(self.feature_size, self.d_model, n_heads, num_layers)
+
+        # Projection finale
+        self.state_embed = nn.Linear(82 * self.d_model, 256)  # comme dans DT_Network
+        self.decoder = nn.Linear(256, action_size)
 
     def forward(self, x, mask=None):
-        x = x.float()
-        x = self.encoder(x)     
-        logits = self.decoder(x) 
+        """
+        x : [B, N, F] où N = 82 lignes, F = feature_size
+        """
+        B, N, F = x.shape
+        assert N == 82, f"Le réseau attend 82 lignes, reçu {N}"
+        assert F == self.feature_size, f"Le réseau attend {self.feature_size} features, reçu {F}"
+
+        # Séparer les parties
+        info_line = x[:, 0, :]   # [B, F]
+        role_line = x[:, 1, :]   # [B, F]
+        ff_lines  = x[:, 2:, :]  # [B, 80, F]
+
+        # Encodage
+        info_emb = self.infos_encoder(info_line)     # [B, d_model]
+        role_emb = self.role_encoder(role_line)      # [B, d_model]
+        ff_emb   = self.ff_encoder(ff_lines)         # [B, 80, d_model]
+
+        # Réassembler
+        full_state = torch.cat([
+            info_emb.unsqueeze(1),  # [B, 1, d_model]
+            role_emb.unsqueeze(1),  # [B, 1, d_model]
+            ff_emb                  # [B, 80, d_model]
+        ], dim=1)  # [B, 82, d_model]
+
+        # Aplatir et passer à la projection
+        state_flat = full_state.flatten(start_dim=1)     # [B, 82*d_model]
+        x_proj = self.state_embed(state_flat)            # [B, 256]
+        logits = self.decoder(x_proj)                    # [B, action_size]
 
         if mask is not None:
             logits = logits + mask
