@@ -125,13 +125,28 @@ def log_categorical(log_x_start, log_prob):
     return (log_x_start.exp() * log_prob).sum(dim=1)
 
 def index_to_log_onehot(x, num_classes):
-    onehots = []
-    for i in range(len(num_classes)):
-        onehots.append(F.one_hot(x[:, i], num_classes[i]))
- 
-    x_onehot = torch.cat(onehots, dim=1)
-    log_onehot = torch.log(x_onehot.float().clamp(min=1e-30))
-    return log_onehot
+    """Convert index tensor to a log one-hot representation.
+
+    This implementation avoids Python loops by computing class offsets once
+    and performing a single scatter operation, which is more efficient than
+    concatenating many one-hot tensors.
+    """
+    device = x.device
+    # offsets for each categorical feature so classes don't overlap when
+    # scattered into the flattened one-hot tensor
+    class_offsets = torch.tensor(
+        [0] + list(np.cumsum(num_classes[:-1])),
+        device=device,
+        dtype=torch.long,
+    )
+    total_classes = class_offsets[-1].item() + num_classes[-1]
+
+    # add offsets and scatter into preallocated tensor
+    x_flat = x + class_offsets
+    x_onehot = torch.zeros(x.shape[0], total_classes, device=device)
+    x_onehot.scatter_(1, x_flat, 1.0)
+
+    return torch.log(x_onehot.clamp(min=1e-30))
 
 def log_sum_exp_by_classes(x, slices):
     device = x.device

@@ -1,22 +1,25 @@
 import torch
 import torch.nn as nn
+# --- Optionnel : neutraliser torch.compile pour ce module si activé ailleurs
+try:
+    import torch._dynamo as dynamo
+except Exception:
+    class _DummyDynamo:
+        def disable(self, *args, **kwargs):
+            def _deco(f): return f
+            return _deco
+        # provide a no-op fallback for mark_dynamic when torch._dynamo
+        # isn't available. This mirrors the real API but simply ignores
+        # the call so code relying on it can still run without errors.
+        def mark_dynamic(self, *args, **kwargs):
+            return None
+    dynamo = _DummyDynamo()
 import numpy as np
 import math
 import torch.nn.functional as F
 from copy import copy
 
 
-
-
-# def weight_init(layers):
-#     for layer in layers:
-#         torch.nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
-# def weight_init(layers):
-#     for layer in layers:
-#         if isinstance(layer, nn.Linear):
-#             nn.init.kaiming_normal_(layer.weight, nonlinearity='relu')
-#             if layer.bias is not None:
-#                 nn.init.zeros_(layer.bias)
 def weight_init(modules):
     for module in modules:
         if isinstance(module, nn.Sequential):
@@ -29,9 +32,11 @@ def weight_init(modules):
             nn.init.kaiming_normal_(module.weight, nonlinearity='relu')
             if module.bias is not None:
                 nn.init.zeros_(module.bias)
+                
 def weight_init_xavier(layers):
     for layer in layers:
         torch.nn.init.xavier_uniform_(layer.weight, gain=0.01)
+
 
 class NoisyLinear(nn.Linear):
     # Noisy Linear Layer for factorised Gaussian noise 
@@ -63,7 +68,7 @@ class NoisyLinear(nn.Linear):
 
         return x.normal_().sign().mul(x.abs().sqrt())
 
-    def forward(self, input):
+    def forward(self, state):
         # sample random noise in sigma weight buffer and bias buffer
         self.eps_p.copy_(self.f(self.eps_p))
         self.eps_q.copy_(self.f(self.eps_q))
@@ -71,11 +76,12 @@ class NoisyLinear(nn.Linear):
         weight = self.mu_weight + self.sigma_weight * self.eps_q.ger(self.eps_p)
         bias = self.mu_bias + self.sigma_bias * self.eps_q.clone()
 
-        return F.linear(input, weight, bias) 
+        return F.linear(state, weight, bias) 
+        
     
 class Dueling_QNetwork(nn.Module):
 
-    def __init__(self, state_size, action_size,layer_size, n_step, seed, num_layers = 8, layer_type="ff", use_batchnorm=True):
+    def __init__(self, state_size, action_size, layer_size, n_step, seed, num_layers = 8, layer_type="ff", use_batchnorm=True):
 
         super(Dueling_QNetwork, self).__init__()
         self.seed = torch.manual_seed(seed)
@@ -83,7 +89,20 @@ class Dueling_QNetwork(nn.Module):
         self.num_layers = num_layers
         self.layer_type = layer_type
         self.use_batchnorm = use_batchnorm
-        
+
+        # AM
+        self.n_heads = 4
+        self.d_model = 64
+        self.d_input = 40 # roles + disp
+        self.attention = Attention(self.d_input, self.d_model, self.n_heads)
+
+        # infos NN
+        self.role_encoder = nn.Linear(self.d_input, self.d_model)
+        self.infos_encoder = nn.Linear(self.d_input, self.d_model)
+
+        # Standard NN
+
+        state_size = self.d_model * (action_size + 2)
 
         layers = []
 
@@ -99,6 +118,8 @@ class Dueling_QNetwork(nn.Module):
             layers.append(nn.ReLU())
 
         self.model = nn.Sequential(*layers)
+
+        # Advantage / Value
         
         if layer_type == "noisy": # pas de batchnorm pour les noisy nets
 
@@ -106,7 +127,7 @@ class Dueling_QNetwork(nn.Module):
             self.ff_1_V = NoisyLinear(layer_size, layer_size)
             self.advantage = NoisyLinear(layer_size,action_size)
             self.value = NoisyLinear(layer_size,1)
-            weight_init([self.model,self.ff_1_A, self.ff_1_V])
+            # weight_init([self.model,self.ff_1_A, self.ff_1_V]) # no init for noisy
 
         else:
 
@@ -119,12 +140,33 @@ class Dueling_QNetwork(nn.Module):
             weight_init([self.model,self.ff_1_A, self.ff_1_V])       
         
     def forward(self, state):
-        # print("state:", state.shape)
         
-        if state.dim() == 1:
+        # if state.dim() == 1:
+        #     state = state.unsqueeze(0)
+
+        if state.dim() == 2:
             state = state.unsqueeze(0)
 
-        x = self.model(state)
+        B, L, F = state.shape
+
+        # print("1", state.shape)
+
+        infos_line = state[:, 0, :]    # [B, F]
+        role_line = state[:, 1, :]   # [B, F]
+        ff_state = state[:, 2:, :]   # [B, N, F]
+        # print("ff_state.shape =", ff_state.shape)
+        attn_output = self.attention(ff_state) 
+        x_flat = attn_output.flatten(start_dim=1)
+
+        infos_vec = self.infos_encoder(infos_line)
+        role_vec = self.role_encoder(role_line)
+        
+        
+        x = torch.cat([infos_vec, role_vec, x_flat], dim=1)
+
+        # print("2", x.shape)
+
+        x = self.model(x)
         # print("post unsq state:", state.shape)
 
         if self.layer_type == "noisy": # pas de batchnorm pour les noisy nets
@@ -148,37 +190,88 @@ class Dueling_QNetwork(nn.Module):
 
 class QVN(nn.Module):
     """Quantile Value Network"""
-    def __init__(self, state_size, action_size,layer_size, n_steps, device, seed, noisy, N):
+    def __init__(self, state_size, action_size,layer_size, n_steps, device, seed, N, num_layers, layer_type, use_batchnorm):
         super(QVN, self).__init__()
         self.seed = torch.manual_seed(seed)
         self.state_size = state_size
         self.action_size = action_size
+        self.layer_size = layer_size
+        self.num_layers = num_layers
+        self.layer_type = layer_type
+        self.use_batchnorm = use_batchnorm
         self.N = N
         self.n_cos = 64
-        self.layer_size = layer_size
         self.pis = torch.FloatTensor([np.pi*i for i in range(1, self.n_cos+1)]).view(1,1,self.n_cos).to(device)
         self.device = device
-        if noisy:
-            layer = NoisyLinear
-        else:
-            layer = nn.Linear
+
+        # AM
+        self.n_heads = 4
+        self.d_model = 64
+        self.d_input = 40 # roles + disp
+        self.attention = Attention(self.d_input, self.d_model, self.n_heads)
+
+        # infos NN
+        self.role_encoder = nn.Linear(self.d_input, self.d_model)
+        self.infos_encoder = nn.Linear(self.d_input, self.d_model)
+
+        # Standard NN
+
+        self.state_size = self.d_model * (self.action_size + 2)
 
 
         # Network Architecture
  
-        self.head = nn.Linear(self.state_size, layer_size) 
-        self.cos_embedding = nn.Linear(self.n_cos, layer_size)
-        self.ff_1 = layer(layer_size, layer_size)
-        self.cos_layer_out = layer_size
-        if not noisy: weight_init([self.head, self.ff_1])
-        self.advantage = layer(layer_size, action_size)
-        self.value = layer(layer_size, 1)
-        if not noisy: weight_init([self.ff_1])
+        self.cos_embedding = nn.Linear(self.n_cos, self.layer_size)
+        self.cos_layer_out = self.layer_size
+
+        layer = []
+        
+        layer.append(nn.Linear(self.state_size, layer_size))
+        if use_batchnorm:
+            layer.append(nn.BatchNorm1d(layer_size))
+        layer.append(nn.ReLU())
+
+        self.head = nn.Sequential(*layer)
+
+        layers = []
+
+        layers.append(nn.Linear(layer_size, layer_size))
+        if use_batchnorm:
+            layers.append(nn.BatchNorm1d(layer_size))
+        layers.append(nn.ReLU())
+
+        for _ in range(num_layers - 2):
+            layers.append(nn.Linear(layer_size, layer_size))
+            if use_batchnorm:
+                layers.append(nn.BatchNorm1d(layer_size))
+            layers.append(nn.ReLU())
+
+        self.model = nn.Sequential(*layers)
+
+        if layer_type == "noisy": # pas de batchnorm pour les noisy nets
+
+            self.ff_1_A = NoisyLinear(layer_size, layer_size)
+            self.ff_1_V = NoisyLinear(layer_size, layer_size)
+            self.advantage = NoisyLinear(layer_size,action_size)
+            self.value = NoisyLinear(layer_size,1)
+            # weight_init([self.model,self.ff_1_A, self.ff_1_V]) # no init for noisy
+
+        else:
+
+            self.ff_1_A = nn.Linear(layer_size, layer_size)
+            self.ff_1_V = nn.Linear(layer_size, layer_size)
+            self.bn_A = nn.BatchNorm1d(layer_size)
+            self.bn_V = nn.BatchNorm1d(layer_size)
+            self.advantage = nn.Linear(layer_size,action_size)
+            self.value = nn.Linear(layer_size,1)
+            weight_init([self.model,self.ff_1_A, self.ff_1_V])  
+ 
 
 
     def calc_input_layer(self):
-        x = torch.zeros(self.input_shape).unsqueeze(0)
+        x = torch.zeros(self.state_size).unsqueeze(0)
         x = self.head(x)
+        x = self.model(x)
         return x.flatten().shape[0]
         
     def calc_cos(self,taus):
@@ -190,17 +283,42 @@ class QVN(nn.Module):
         assert cos.shape == (batch_size,n_tau,self.n_cos), "cos shape is incorrect"
         return cos
     
-    def forward(self, input):
+    def forward(self, state):
 
-        return torch.relu(self.head(input))
+        assert state.dim() == 3, f"Expected state to be 3D [B, L, F], got {state.shape}"
+        assert state.shape[2] == 40, f"Expected last dimension to be 40, got {state.shape[2]}"
+
+        if state.dim() == 2:
+            state = state.unsqueeze(0)
+
+        B, L, F = state.shape
+
+        # print("1", state.shape)
+
+        infos_line = state[:, 0, :]    # [B, F]
+        role_line = state[:, 1, :]   # [B, F]
+        ff_state = state[:, 2:, :]   # [B, N, F]
+        # print("ff_state.shape =", ff_state.shape)
+        attn_output = self.attention(ff_state) 
+        x_flat = attn_output.flatten(start_dim=1)
+
+        infos_vec = self.infos_encoder(infos_line)
+        role_vec = self.role_encoder(role_line)
         
-    def get_quantiles(self, input, taus, embedding=None):
+        
+        x = torch.cat([infos_vec, role_vec, x_flat], dim=1)
+
+        x = self.head(x)
+
+        return self.model(x)
+        
+    def get_quantiles(self, x, taus, embedding=None):
 
         if embedding==None:
-            x = self.forward(input)
-
+            x = self.head(x)
         else:
             x = embedding
+            
         batch_size = x.shape[0]
         num_tau = taus.shape[1]
         cos = self.calc_cos(taus) # cos shape (batch, num_tau, layer_size)
@@ -208,14 +326,27 @@ class QVN(nn.Module):
         cos_x = torch.relu(self.cos_embedding(cos)).view(batch_size, num_tau, self.cos_layer_out) # (batch, n_tau, layer)
         
         # x has shape (batch, layer_size) for multiplication –> reshape to (batch, 1, layer)
-        x = (x.unsqueeze(1)*cos_x).view(batch_size*num_tau, self.cos_layer_out)   
-        x = torch.relu(self.ff_1(x))
- 
-        advantage = self.advantage(x)
-        value = self.value(x)
-        out = value + advantage - advantage.mean(dim=1, keepdim=True)
+        x = (x.unsqueeze(1)*cos_x).view(batch_size*num_tau, self.cos_layer_out)           
+        x = self.model(x)
 
-        return out.view(batch_size, num_tau, self.action_size)
+        if self.layer_type == "noisy": # pas de batchnorm pour les noisy nets
+            x_A = torch.relu(self.ff_1_A(x))
+            x_V = torch.relu(self.ff_1_V(x))
+        else:
+            x_A = torch.relu(self.bn_A(self.ff_1_A(x)))
+            x_V = torch.relu(self.bn_V(self.ff_1_V(x)))
+
+        value = self.value(x_V)
+        # value = value.expand(state.size(0), self.action_size)
+        advantage = self.advantage(x_A)
+
+        if self.use_batchnorm:
+            Q = value + advantage - advantage.mean(dim=1, keepdim=True)
+        else:
+            Q = value + advantage - advantage.mean()
+        # return Q
+
+        return Q.view(batch_size, num_tau, self.action_size)
     
     
 
@@ -231,8 +362,6 @@ class FPN(nn.Module):
         weight_init_xavier([self.ff])
         
     def forward(self,x):
-
-
         q = self.softmax(self.ff(x)) 
         q_probs = q.exp()
         taus = torch.cumsum(q_probs, dim=1)
@@ -243,6 +372,210 @@ class FPN(nn.Module):
         assert entropy.shape == (q.shape[0], 1), "instead shape {}".format(entropy.shape)
         
         return taus, taus_, entropy
+
+## AM
+
+class Attention(nn.Module):
+    def __init__(self, d_input, d_model, n_heads):
+        super().__init__()
+        self.multihead_attn = nn.MultiheadAttention(embed_dim=d_model, num_heads=n_heads, batch_first=True)
+        self.embedding = nn.Linear(d_input, d_model)
+        self.norm = nn.LayerNorm(d_model)
+
+    def forward(self, x):
+        x_embed = self.embedding(x)  # [n_pompiers, d_model]
+        attn_output, _ = self.multihead_attn(x_embed, x_embed, x_embed)
+        output = self.norm(attn_output + x_embed)  # résiduel + normalisation
+        return output # .squeeze(0)  # [n_pompiers, d_model]
+
+
+
+class SetEncoder(nn.Module):
+    def __init__(self, in_dim, d_model=128, nhead=4, num_layers=2):
+        super().__init__()
+        self.embedding = nn.Linear(in_dim, d_model)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, batch_first=True)
+        # IMPORTANT : désactive NestedTensor pour éviter l’erreur avec FakeTensor/torch.compile
+        self.encoder = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=num_layers,
+            enable_nested_tensor=False
+        )
+        self.norm = nn.LayerNorm(d_model)
+
+    @dynamo.disable()  # évite les soucis TorchDynamo sur ce bloc précis
+    def forward(self, x, key_padding_mask):
+        """
+        x: [B, L, in_dim]
+        key_padding_mask: [B, L]  (True = à masquer). Peut être float/bool; on standardise.
+        """
+        x = self.embedding(x)
+        # Standardise le masque : bool + bon device + tenseur contigu
+        key_padding_mask = key_padding_mask.to(dtype=torch.bool, device=x.device)
+        x = x.contiguous()
+        x = self.encoder(x, src_key_padding_mask=key_padding_mask)
+        x = self.norm(x)
+        return x
+
+class FirefighterEncoder(nn.Module):
+    def __init__(self, feature_size, d_model, n_heads, num_layers):
+        super().__init__()
+        self.embedding = nn.Linear(feature_size, d_model)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, batch_first=True)
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers,
+            enable_nested_tensor=False)
+        self.norm = nn.LayerNorm(d_model)
+
+    def forward(self, x):  # ff_lines: [B, 80, 40]
+
+        if x.dim() == 3:
+            # Input shape: [B, N, F]
+            x = self.embedding(x)           # [B, N, d_model]
+            x = self.encoder(x)             # [B, N, d_model]
+            x = self.norm(x)
+            return x                        # [B, N, d_model]
+
+        elif x.dim() == 4:
+            # Input shape: [B, T, N, F]
+            B, T, N, F = x.shape
+            x = self.embedding(x)           # [B, T, N, d_model]
+            x = x.view(B * T, N, -1)        # [B*T, N, d_model]
+            x = self.encoder(x)             # [B*T, N, d_model]
+            x = self.norm(x)
+            x = x.view(B, T, N, -1)         # [B, T, N, d_model]
+            return x
+
+        else:
+            raise ValueError(f"Unsupported input shape {x.shape}, expected [B, N, F] or [B, T, N, F]")
+
+### Decision Transformer Network
+
+class DecisionTransformer(nn.Module):
+    def __init__(self, d_model, n_heads, num_layers):
+        super().__init__()
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=n_heads, batch_first=True)
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers,
+            enable_nested_tensor=False)
+        self.norm = nn.LayerNorm(d_model)
+    
+    def forward(self, x, key_padding_mask):
+        x = self.encoder(x, src_key_padding_mask=key_padding_mask)
+        return self.norm(x)
+
+def pad_and_mask(seqs, pad_value=0):
+    lengths = [seq.size(0) for seq in seqs]
+    max_len = max(lengths)
+    padded = torch.full((len(seqs), max_len, *seqs[0].size()[1:]), pad_value, dtype=seqs[0].dtype)
+    mask = torch.zeros(len(seqs), max_len, dtype=torch.bool)
+    for i, seq in enumerate(seqs):
+        padded[i, :seq.size(0)] = seq
+        mask[i, :seq.size(0)] = 1
+    return padded, mask
+
+class DT_Network(nn.Module):
+
+    def __init__(self, state_size, action_size, feature_size, layer_size, num_layers, max_len, seed):
+        super().__init__()
+
+        self.seed = torch.manual_seed(seed)
+        self.state_size = state_size
+        self.action_size = action_size
+        self.feature_size = feature_size
+        self.num_layers = num_layers
+        self.layer_size = layer_size
+        self.max_len = max_len
+    
+        # AM
+        self.n_heads = 4
+        self.d_model = 128
+        self.ff_encoder = FirefighterEncoder(self.feature_size, self.d_model, self.n_heads, self.num_layers)
+    
+        # infos NN
+        self.role_encoder = nn.Sequential(
+                                            nn.Linear(self.feature_size, self.d_model),
+                                            nn.ReLU(),
+                                            nn.Linear(self.d_model, self.d_model),
+                                            nn.ReLU(),
+                                            nn.Linear(self.d_model, self.d_model)
+                                        )
+        self.infos_encoder = nn.Sequential(
+                                            nn.Linear(self.feature_size, self.d_model),
+                                            nn.ReLU(),
+                                            nn.Linear(self.d_model, self.d_model),
+                                            nn.ReLU(),
+                                            nn.Linear(self.d_model, self.d_model)
+                                        )
+
+        # DT
+
+        self.layer_size = 256
+        
+        self.transformer = DecisionTransformer(self.layer_size, self.n_heads, self.num_layers)
+        
+        
+        self.state_embed = nn.Linear(82*self.d_model, self.layer_size)
+        self.action_embed = nn.Embedding(self.action_size, self.layer_size)
+        self.rtg_embed = nn.Linear(1, self.layer_size)
+        self.time_embed = nn.Embedding(self.max_len, self.layer_size)
+
+
+        self.predict_action = nn.Linear(self.layer_size, self.action_size)
+
+    def forward(self, states, actions, returns_to_go, timesteps, mask):
+
+        # print(states.shape)
+
+        B, T, L, F = states.size()
+
+        # Enforce static expectations on invariant dimensions to provide
+        # explicit shape constraints to the compiler. Only batch (B) and
+        # sequence (T) dimensions may vary between calls.
+        assert L == 82, f"expected 82 lines in state tensor, got {L}"
+        assert F == self.feature_size, (
+            f"expected last dimension {self.feature_size}, got {F}"
+        )
+
+        info_lines = states[:, :, 0, :]  # [B, T, F]
+        role_lines = states[:, :, 1, :]    # [B, T, F]
+        ff_lines = states[:, :, 2:, :]    # [B, T, N, F]
+
+        info_emb = self.infos_encoder(info_lines)  # [B, T, hidden]
+        # print("info_emb.shape", info_emb.shape)
+        role_emb = self.role_encoder(role_lines)        # [B, T, hidden]
+        # print("role_emb.shape", role_emb.shape)
+        ff_emb = self.ff_encoder(ff_lines)           # [B, T, N, hidden]
+        # print("ff_emb.shape", ff_emb.shape)
+        # ff_flat = ff_emb.flatten(start_dim=2)             # [B, T, N * hidden]
+        # print("ff_flat.shape", ff_flat.shape)
+
+        full_state = torch.cat([
+            info_emb.unsqueeze(2),  # [B, T, 1, hidden]
+            role_emb.unsqueeze(2),  # [B, T, 1, hidden]
+            ff_emb  # [B, T, 80, hidden]
+        ], dim=2)  # [B, T, 82, hidden]
+
+        state_flat = full_state.flatten(start_dim=2)  # [B, T, 82 * hidden]
+        state_embeddings = self.state_embed(state_flat)
+        # print("state_embeddings.shape", state_embeddings.shape)
+
+        action_embeddings = self.action_embed(actions)
+        # print("action_embeddings.shape", action_embeddings.shape)
+        rtg_embeddings = self.rtg_embed(returns_to_go)
+        # print("rtg_embeddings.shape", rtg_embeddings.shape)
+        time_embeddings = self.time_embed(timesteps)
+        # print("time_embeddings.shape", time_embeddings.shape)
+
+
+        tokens = torch.stack((rtg_embeddings, state_embeddings, action_embeddings), dim=2).view(B, 3 * T, -1)
+        time_embeddings = time_embeddings.repeat(1, 1, 3).view(B, 3 * T, -1)
+
+        x = tokens + time_embeddings
+        key_padding_mask = ~mask.unsqueeze(2).repeat(1, 1, 3).view(B, 3 * T)
+        # print("x.shape", x.shape)
+        x = self.transformer(x, key_padding_mask=key_padding_mask)
+        # print("x.shape", x.shape)
+        x = x[:, 1::3]  # only use state outputs for action prediction
+        return self.predict_action(x)
 
 class POMO_Network(nn.Module):
     """add transformers for embeddings and link between stats"""
@@ -263,6 +596,8 @@ class POMO_Network(nn.Module):
 
         self.encoder = nn.Sequential(*layers)
         self.decoder = nn.Linear(hidden_size, action_size)
+        
+        # self.encoder = FirefighterEncoder(state_size,n_heads)
 
     def forward(self, x, mask=None):
         x = x.float()

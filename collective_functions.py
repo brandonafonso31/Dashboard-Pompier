@@ -383,9 +383,9 @@ def create_dic_roles(df_vehicles_history):
     df_vehicles_history["Fonction"] = df_vehicles_history["Fonction"].replace(dic_replace)
     
     dic_roles = {}
-    
-    for idx, row in df_vehicles_history.iterrows():
-    
+
+    for _, row in df_vehicles_history.iterrows():
+
         tm = row["Type Matériel"]
         t = row["Type"]
         f = row["Fonction"]

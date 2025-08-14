@@ -29,17 +29,8 @@ def decode_periodic(sin_value, cos_value, period):
 def sincos_inverse_transform(df_sample, df_res, y_gen):
 
     df_sample["Day"] = df_res.apply(lambda row: decode_periodic(row['Day_sin'], row['Day_cos'], 365), axis=1)
-    # df_sample["Day_week"] = df_res.apply(lambda row: decode_periodic(row['Day_week_sin'], row['Day_week_cos'], 7), axis=1)
-    # df_sample["Day_month"] = df_res.apply(lambda row: decode_periodic(row['Day_month_sin'], row['Day_month_cos'], 31), axis=1)
     df_sample["Month"] = df_res.apply(lambda row: decode_periodic(row['Month_sin'], row['Month_cos'], 12), axis=1)
     df_sample["Hour"] = df_res.apply(lambda row: decode_periodic(row['Hour_sin'], row['Hour_cos'], 24), axis=1)
-
-    # df_sample.loc[df_sample["Month"] > 11, "Month"] = 0
-    # # df_sample.loc[df_sample["Day"] > 364, "Day"] = 0
-    # df_sample.loc[df_sample["Hour"] > 23, "Hour"] = 0
-    # df_sample.loc[df_sample["Day_week"] > 6, "Day_week"] = 0
-    # df_sample.loc[df_sample["Day_month"] > 30, "Day_month"] = 0
-
     df_sample["Incident"] = y_gen + 1
     df_sample["Duration"] = df_sample["Duration"].apply(lambda x : x if x > 10 and x < 20*60 else df_sample["duree"].median()).astype(int)
     
@@ -75,9 +66,11 @@ def get_point_in_area(point, zones):
     else:
         return ""
 
-def create_df_new_samples(df_raw, col, var=0.02):
+def create_df_new_samples(df_raw, col, pressure=1, var=0.02):
 
     df_test = pd.DataFrame(df_raw[col].value_counts().reset_index())
+    df_test["count"] *= pressure
+    df_test["count"] = df_test["count"].astype(int)
     # df_test = df_test.rename(columns={"index" : "area_name", "area_name":"count"})
     df_test.loc[:, "new_samples"] = df_test["count"].apply(gen_num_samples, args=(var,))
     df_test.loc[:, "perc."] = df_test["new_samples"] / df_test["count"] * 100 - 100
@@ -101,12 +94,14 @@ def gen_num_samples(num_samples, var):
 def new_df_sample(df_test, col, df_oversampled):
 
     list_of_df = []
-    for idx, row in df_test.iterrows():
-                
+    for _, row in df_test.iterrows():
+
         if len(df_oversampled[df_oversampled[col] == row[col]]) >= row["new_samples"]:
-            list_of_df.append(df_oversampled[df_oversampled[col] == row[col]].sample(int(row["new_samples"])))
-            
-        else:            
+            list_of_df.append(
+                df_oversampled[df_oversampled[col] == row[col]].sample(int(row["new_samples"]))
+            )
+
+        else:
             list_of_df.append(df_oversampled[df_oversampled[col] == row[col]])
 
     return pd.concat(list_of_df, ignore_index=True)
@@ -174,6 +169,8 @@ if __name__ == "__main__":
     parser.add_argument("--save_as", type=str, default="dqn", help="Save model in path_to_file")
     parser.add_argument("--load_as", type=str, default="dqn", help="Load model from path_to_file")
     parser.add_argument("--os_factor", type=int, default=3, help="Oversampling factor")
+    parser.add_argument("--pressure", type=float, default=1, help="Number of interventions to sample, 1 is 100% from real dataset")
+
     parser.add_argument("--to_keep", type=int, default=10, help="nb of highest values to keep by harmonization")
     parser.add_argument("--value_span", type=int, default=25, help="nb of interventions to permute by harmonization")    
     parser.add_argument("--sample_batch_size", type=int, default=8192, help="Batch size of samples")
@@ -182,7 +179,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    print("os factor:", args.os_factor, "sample batch size:", args.sample_batch_size, "variability:", args.variability, flush=True)
+    print("os factor:", args.os_factor, "sample batch size:", args.sample_batch_size, "pressure:", args.pressure, "variability:", args.variability, flush=True)
 
     os.chdir('../')
 
@@ -209,10 +206,6 @@ if __name__ == "__main__":
 
     df_sample = quantile_inverse_transform(df_res, normalizer_ddpm)
     df_oversampled = sincos_inverse_transform(df_sample, df_res, y_gen)
-    # df_oversampled[["Month_sin", "Month_cos", "Day_sin", "Day_cos", "Hour_sin", "Hour_cos"]] = \
-    # df_res[["Month_sin", "Month_cos", "Day_sin", "Day_cos", "Hour_sin", "Hour_cos"]]
-
-    
 
     df_oversampled[["Month_sin", "Month_cos", "Day_sin", "Day_cos", "Hour_sin", "Hour_cos"]] = \
     df_res[["Month_sin", "Month_cos", "Day_sin", "Day_cos", "Hour_sin", "Hour_cos"]]
@@ -230,7 +223,7 @@ if __name__ == "__main__":
     gdf_fake = gpd.GeoDataFrame(df_oversampled, geometry=gpd.points_from_xy(df_oversampled['Coord X'], df_oversampled['Coord Y']), crs="2154")
     df_oversampled['area_name'] = gdf_fake["geometry"].apply(get_point_in_area, args=(zones,))
     
-    df_new_samples = create_df_new_samples(df_real, "area_name", args.variability)
+    df_new_samples = create_df_new_samples(df_real, "area_name", args.pressure, args.variability)
     print(df_new_samples.columns, flush=True)
     if df_new_samples.delta.sum() == 0:
         print("new samples OK", flush=True)

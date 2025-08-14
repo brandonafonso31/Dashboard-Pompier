@@ -42,15 +42,18 @@ if __name__ == "__main__":
     compute = False
 
     device = torch.device(hyper_params["device"])
-    torch.autograd.set_detect_anomaly(True)
+    # Enable cuDNN autotuner for faster convolutions on GPU
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
 
     if args.agent_model == "dt":
         agent = DT_Agent(**hyper_params)
 
-    print("Agent", args.agent_model, "initialized", flush=True)
+    print("Agent", args.agent_model, "initialized in", args.train, flush=True)
 
     if args.train:
         if args.load:
+            print("Loading weights")
             os.chdir('../SVG_model')
             agent.dt_network.load_state_dict(torch.load(args.model_name, weights_only=True))
             print("Weights loaded")
@@ -110,10 +113,10 @@ if __name__ == "__main__":
 
     wandb.init(project="simu_ff", name=args.model_name, config=hyper_params)
 
-    for idx, inter in df_pc.iterrows():
-    
-        num_inter, date, pdd, required_departure, zone, duration, month, day, hour, minute, \
-        coord_x, coord_y, month_sin, month_cos, day_sin, day_cos, hour_sin, hour_cos = inter
+    for row in df_pc.itertuples(index=True, name=None):
+
+        idx, num_inter, date, pdd, required_departure, zone, duration, month, day, hour, minute, \
+        coord_x, coord_y, month_sin, month_cos, day_sin, day_cos, hour_sin, hour_cos = row
         
         dic_ff = update_duration(date, old_date, current_ff_inter, dic_ff)
     

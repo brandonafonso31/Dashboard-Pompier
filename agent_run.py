@@ -49,10 +49,11 @@ if __name__ == "__main__":
         agent = DQN_Agent(**hyper_params)
     elif args.agent_model == "fqf":
         agent = FQF_Agent(**hyper_params)
+    elif args.agent_model == "cql":
+        agent = CQL_Agent(**hyper_params)
     elif args.agent_model == "pomo":
         agent = POMO_Agent(**hyper_params)
     print("Agent", args.agent_model, "initialized", flush=True)
-    print(agent.qnetwork_local)
 
     if args.train:
         if args.load:
@@ -110,11 +111,11 @@ if __name__ == "__main__":
 
     wandb.init(project="simu_ff", name=args.model_name, config=hyper_params)
 
-    # for idx, inter in tqdm(df_pc.iloc[:-20].iterrows(), total=len(df_pc.iloc[:-20])):
-    for idx, inter in df_pc.iterrows():
-    
-        num_inter, date, pdd, required_departure, zone, duration, month, day, hour, minute, \
-        coord_x, coord_y, month_sin, month_cos, day_sin, day_cos, hour_sin, hour_cos = inter
+    # for idx, inter in tqdm(df_pc.iloc[:-20].itertuples(index=True, name=None), total=len(df_pc.iloc[:-20])):
+    for row in df_pc.itertuples(index=True, name=None):
+
+        idx, num_inter, date, pdd, required_departure, zone, duration, month, day, hour, minute, \
+        coord_x, coord_y, month_sin, month_cos, day_sin, day_cos, hour_sin, hour_cos = row
         
         dic_ff = update_duration(date, old_date, current_ff_inter, dic_ff)
     
@@ -536,10 +537,9 @@ if __name__ == "__main__":
                                                     loss = l0
                                             else:
                                                 loss = 0
-                                            
-                                            #print(all_ff_waiting)
+                                                
                                             action, skill_lvl = agent.act(state, all_ff_waiting, eps)
-                                            #print(f"ff_existing: {ff_existing} action: {action} skill_lvl: {skill_lvl}")
+
                                             # if all_ff_waiting:
                                                 # print("action", action)
     
@@ -630,6 +630,4 @@ if __name__ == "__main__":
         pickle.dump(dic_indic, open(args.save_metrics_as + ".pkl", "wb"))
         pickle.dump(reward_evo, open(args.model_name + "_reward_evo.pkl", "wb"))
         print("Metrics and reward evolution saved")
-
-
 

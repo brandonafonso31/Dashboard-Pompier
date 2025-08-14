@@ -71,36 +71,6 @@ def get_number_v(status):
     ss = dic_vehicles.keys()
     return sum(len(dic_vehicles[s][status]) for s in ss)
 
-def get_skills_from_role(df_roles, role):
-    return df_roles[(df_roles["Fonction"] == role)]["Competences"].reset_index(drop=True).values
-
-
-def get_ff_compatible(df, station, ff_available, date, plus, minus):
-
-    df_filtered = df.loc[ff_available, :]    
-    mask_all_competences = pd.concat([(df_filtered[(comp, "Début")] <= date) & (df_filtered[(comp, "Fin")] >= date)
-        for comp in plus], axis=1).all(axis=1)
-    
-    if len(df_filtered[mask_all_competences]) == 0:
-        return []
-
-    else:
-        ff_plus = df_filtered[mask_all_competences].index.tolist()
-        df_filtered_2 = df.loc[ff_plus, :]
-        mask_nan_debut = df_filtered_2[[(comp, 'Début') for comp in minus]].isna()
-        if len(df_filtered_2[mask_nan_debut.all(axis=1)]) == 0:
-            return []
-        else:            
-            return df_filtered_2[mask_nan_debut.all(axis=1)].index.tolist()
-
-def get_potential_ginc(Z_1, dic_vehicles, dic_functions):
-
-    # 2 FPT + 1 EPC en Z1
-    fpt_disp = len([item for s in Z_1 for item in dic_vehicles[s]["available"] if any("FPT" in func for func in dic_functions[item])])
-    ep_disp = len([item for s in Z_1 for item in dic_vehicles[s]["available"] if any("EP" in func for func in dic_functions[item])])
-
-    return fpt_disp, ep_disp
-
 def get_stations(x, y, df_pdd, stations_u):
     point = Point([x, y])
     pdd = df_pdd.loc[:, df_pdd.columns.str.startswith('cis')].iloc[np.where(df_pdd.geometry.contains(point))].values[0]
@@ -180,7 +150,9 @@ def precompute_prob_dict(df_inter_clean):
     nested_dict = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
 
     for _, row in df_inter_clean.iterrows():
-        incident, area, list_of_strings = row["incident_name"], row["area_type"], tuple(row["real_func"])
+        incident = row["incident_name"]
+        area = row["area_type"]
+        list_of_strings = tuple(row["real_func"])
         nested_dict[incident][area][list_of_strings] += 1
     
     nested_dict = {k: {kk: dict(vv) for kk, vv in v.items()} for k, v in nested_dict.items()}
@@ -274,8 +246,8 @@ def precompute_date(df_sample, start_year, seed=42):
     vc = df_sample.Day.value_counts().sort_index()
     print(vc.idxmin(), vc.idxmax())
     print(vc)
-
-    df_sample["Minute"] = np.random.randint(0, 60, size=len(df_sample))
+    if "Minute" not in df_sample.columns:
+        df_sample["Minute"] = np.random.randint(0, 60, size=len(df_sample))
     df_sample['date'] =  datetime(start_year, 1, 1) \
     + pd.to_timedelta(df_sample['Day'] -1, unit='D') \
     + pd.to_timedelta(df_sample['Hour'], unit='h') \
@@ -284,7 +256,7 @@ def precompute_date(df_sample, start_year, seed=42):
     df_sample["Month"] = df_sample["date"].dt.month
     df_sample["Day"] = df_sample["date"].dt.day
     df_sample["Hour"] = df_sample["date"].dt.hour
-    df_sample["Minute"] = df_sample["date"].dt.minute
+    df_sample["Minute"] = df_sample["date"].dt.floor('s').dt.minute
 
     return df_sample
 
@@ -317,7 +289,24 @@ def precompute_returns(df_sample, start_inter, end_inter, is_fake):
 
 def create_responses(df_responses, df_rank_incident):
 
-    dic_replace = {"CCF DEGRAD":"CCF", "XCOMPL":"COMPL", "VPL":"VSN", "EMB":"VEMB", "CEIN":"VSAV"}
+    dic_replace = {"CCF DEGRAD":"CCF", 
+                   "XCOMPL":"COMPL", 
+                   "VPL":"VSN", 
+                   "EMB":"VEMB", 
+                   "CEIN":"VSAV", 
+                   'EPA DEGRAD':"EPC18",
+                   'VL[X-GPT OPERATION]':'VL', 
+                   'VSN[TOULOUSE - LOUGNON]':'VSN',  
+                   'VFT[ST GAUDENS]':"VFT", 
+                   'VSR[COLOMIERS]':"VSR", 
+                   'VL[X-CTA CODIS]':"VL",
+                   "CESDMF":"CESD",
+                    'FPT   MPR':"FPT",
+                    'VLHR[Z CRS LUCHON]':"VLHR",
+                    'VPL':"VSN",
+                   'PSECINC    MPR':"PSECINC",
+                    'PSECINC2    MPR':"PSECINC2"
+                  }
     df_responses["Materiel"] = df_responses["Materiel"].replace(dic_replace)
     df_responses = df_responses.dropna(subset=['Materiel']).reset_index(drop=True)
     dict_result = df_rank_incident.set_index('rank')['sin'].to_dict()
@@ -325,10 +314,10 @@ def create_responses(df_responses, df_rank_incident):
     df_responses_short =  df_responses[df_responses['Nom'].isin(valeurs_a_chercher)].reset_index(drop = True)
     dic_inc_ar_mat = {}
 
-    for index, row in df_responses_short.iterrows():
-        nom = row['Nom']
-        secteur = row['Secteur']
-        materiel = row['Materiel']
+    for _, row in df_responses_short.iterrows():
+        nom = row["Nom"]
+        secteur = row["Secteur"]
+        materiel = row["Materiel"]
         
         materiel_dict = extract_bracket_number_and_clean(materiel)
         
@@ -438,7 +427,7 @@ if __name__ == "__main__":
 
     os.chdir('./Data')
 
-    df_sorties = pd.read_csv("sorties_2018.csv", sep=";")
+    # df_sorties = pd.read_csv("sorties_2018.csv", sep=";")
     df_firestations = pd.read_csv("firestations.csv", sep = ';')
     df_materiel = pd.read_csv("materiel_2018.csv", sep=";")
     df_comp = pd.read_csv("comp_2018.csv", sep=";")
@@ -481,7 +470,7 @@ if __name__ == "__main__":
     is_fake = False
     df_pc_real = pd.read_pickle("df_real.pkl")
     window = len(df_pc_real)
-    print("window:", window)
+    print("window real:", window)
     df_pc_real = precompute_pdd(df_pdd, df_pc_real, stations_u)
     df_pc_real = precompute_zone(df_stations, df_pc_real, Z_1, Z_2, Z_3)
     df_pc_real = precompute_incident(df_rank_incident, df_pc_real)
@@ -527,9 +516,16 @@ if __name__ == "__main__":
     dfs_to_concat = []
     start_year = 2018
     start_inter = 1
-    end_inter = window
+    window = 0
+    end_inter = 0
 
     for sample_file in args.sample_list:
+
+        start_inter += window
+        window = len(pd.read_pickle(sample_file))
+        print("window fake:", window)
+        end_inter += window
+
 
         print("start_year", start_year, "start_inter", start_inter, "end_inter", end_inter)
 
@@ -558,8 +554,7 @@ if __name__ == "__main__":
         print(sample_file, len(df_pc_fake), "done")
         dfs_to_concat.append(df_pc_fake)
         start_year += 1
-        start_inter += window
-        end_inter += window
+
 
 
     df_pc_fake = pd.concat(dfs_to_concat, ignore_index=True)
