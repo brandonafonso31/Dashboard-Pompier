@@ -1124,59 +1124,87 @@ class DT_Agent:
 
 # POMO
 class POMO_Agent:
-    """ focus 3 metriques : skill_lvl, v_sent, ff_sent"""
-    def __init__(self, state_size, action_size, layer_size, num_layers,
-                 use_batchnorm, device, seed, lr=0.0001, pomo_size=3, batch_size=25, **kwargs):
-
-        self.device = device
+    def __init__(self,
+                 state_size,
+                 action_size,
+                 layer_type,
+                 layer_size,
+                 num_layers,
+                 use_batchnorm,
+                 n_steps,
+                 batch_size,
+                 buffer_size,
+                 update_every,
+                 per,
+                 rdm,
+                 munchausen,
+                 curiosity,
+                 curiosity_size,
+                 lr,
+                 lr_dec,
+                 entropy_tau,
+                 entropy_tau_coeff,
+                 lo,
+                 alpha,
+                 gamma,
+                 tau,
+                 N,
+                 entropy_coeff,
+                 decay_update,
+                 device,
+                 seed,
+                 **kwargs):
+        
+        self.device = torch.device(device)
         self.seed = torch.manual_seed(seed)
         self.action_size = action_size
-        self.pomo_size = pomo_size
+        self.pomo_size = 3  # You can also put in config if needed
         self.batch_size = batch_size
 
+        # Derive feature size from state_size and N
+        feature_size = state_size // (action_size + 2)
+
+        # Create transformer-based POMO network
         self.qnetwork_local = POMO_Network(
-            state_size=state_size,
-            hidden_size=layer_size,
-            num_layers=num_layers,
-            use_batchnorm=use_batchnorm,
-            seed=seed,
-            action_size=action_size
-        ).to(device)
+            feature_size=feature_size,
+            action_size=action_size,
+            d_model=128,      # You can tweak this
+            n_heads=4,
+            num_layers=2,     # Transformer layers, not the MLP ones
+            seed=seed
+        ).to(self.device)
 
         self.optimizer = optim.Adam(self.qnetwork_local.parameters(), lr=lr)
 
-        # Buffers POMO
         self.trajectory_states = []
         self.trajectory_actions = []
         self.trajectory_rewards = []
+
 
     def act(self, state, all_ff_waiting=None, eps=0.):
         """Sélectionne une action valide avec sampling POMO."""
         potential_actions, potential_skills = get_potential_actions(state, all_ff_waiting)
         if len(potential_actions) == 0:
             potential_actions = list(range(self.action_size))  # fallback
-        
-        # [1, N, H] -> [pomo_size, N, H]
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-        state_tensor = state_tensor.expand(self.pomo_size, -1, -1)  # [pomo_size, N, H]
-        
+
+        # Convert to tensor [1, N, F] -> expand to [pomo_size, N, F]
+        state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+        state_tensor = state_tensor.expand(self.pomo_size, -1, -1)  # [pomo_size, N, F]
+
         self.qnetwork_local.eval()
         with torch.no_grad():
-            B, N, H = state_tensor.shape
-            state_tensor_flat = state_tensor.view(B, -1)  # [pomo_size, N*H]
-            
-            logits = self.qnetwork_local(state_tensor_flat)  # [pomo_size, action_size]
-            
+            # No flattening — network expects structured input
+            logits = self.qnetwork_local(state_tensor)  # [pomo_size, action_size]
+
             # Filtre actions valides
             pa_tensor = torch.tensor(potential_actions, dtype=torch.long, device=self.device)  # [K]
             logits_subset = logits[:, pa_tensor]  # [pomo_size, K]
-            
             probs_subset = F.softmax(logits_subset, dim=-1)  # [pomo_size, K]
-            
+
             # Sampling
             sampled_idx = torch.multinomial(probs_subset, num_samples=1).squeeze(1)  # [pomo_size]
             actions = pa_tensor[sampled_idx]  # indices globaux
-        
+
         self.qnetwork_local.train()
 
         # Action majoritaire
@@ -1187,37 +1215,34 @@ class POMO_Agent:
         skill_lvl = potential_skills[potential_actions.index(best_action)]
         return best_action, skill_lvl
 
+
     def step(self, state, action, reward, next_state, done=None):
         """Stocke la transition et entraîne si batch complet."""
-        
-        state = torch.from_numpy(state).float()
-        next_state = torch.from_numpy(next_state).float() 
-        
-        # Format state
+        # Convert to tensor [1, N, F]
         state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device)
-        if state_tensor.ndim == 2:  # [N, H]
-            state_tensor = state_tensor.unsqueeze(0)  # [1, N, H]
-        state_flat = state_tensor.view(1, -1).expand(self.pomo_size, -1)  # [pomo_size, N*H]
+        if state_tensor.ndim == 2:  # [N, F]
+            state_tensor = state_tensor.unsqueeze(0)
+        state_tensor = state_tensor.expand(self.pomo_size, -1, -1)  # [pomo_size, N, F]
 
         # Actions & rewards
         action_tensor = torch.full((self.pomo_size,), int(action), dtype=torch.long, device=self.device)
         reward_tensor = torch.full((self.pomo_size,), float(reward), dtype=torch.float32, device=self.device)
 
-        # Stockage (une seule fois ici)
-        self.trajectory_states.append(state_flat)
+        # Stockage
+        self.trajectory_states.append(state_tensor)
         self.trajectory_actions.append(action_tensor)
         self.trajectory_rewards.append(reward_tensor)
 
         # Update si batch complet
         if len(self.trajectory_states) >= self.batch_size // self.pomo_size:
-            states = torch.cat(self.trajectory_states, dim=0)  # [batch_size, N*H]
+            states = torch.cat(self.trajectory_states, dim=0)  # [batch_size, N, F]
             actions = torch.cat(self.trajectory_actions, dim=0)  # [batch_size]
             rewards = torch.cat(self.trajectory_rewards, dim=0)  # [batch_size]
 
             logits = self.qnetwork_local(states)  # [batch_size, action_size]
             log_probs = torch.log_softmax(logits, dim=-1)  # [batch_size, action_size]
-            
-            selected_log_probs = log_probs[torch.arange(log_probs.size(0), device=self.device), actions]  # [batch_size]
+
+            selected_log_probs = log_probs[torch.arange(log_probs.size(0), device=self.device), actions]
 
             # Advantage
             advantage = rewards - rewards.mean()
@@ -1239,3 +1264,4 @@ class POMO_Agent:
             return loss.item()
 
         return 0.0
+
