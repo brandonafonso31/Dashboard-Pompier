@@ -1158,7 +1158,7 @@ class POMO_Agent:
         self.device = torch.device(device)
         self.seed = torch.manual_seed(seed)
         self.action_size = action_size
-        self.pomo_size = 3  # You can also put in config if needed
+        self.pomo_size = 3
         self.batch_size = batch_size
 
         # Derive feature size from state_size and N
