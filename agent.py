@@ -1234,9 +1234,9 @@ class POMO_Agent:
         # Actions (même pour toutes les trajectoires)
         action_tensor = torch.full((self.pomo_size,), int(action), dtype=torch.long, device=self.device)
 
-        # Rewards (un par trajectoire, ex: [r_metric1, r_metric2, r_metric3])
+        # Rewards (on garde le meilleur parmi les métriques)
         best_reward = max(rewards)
-        reward_tensor = torch.as_tensor(best_reward, dtype=torch.float32, device=self.device)
+        reward_tensor = torch.full((self.pomo_size,), float(best_reward), dtype=torch.float32, device=self.device)
 
         # Stockage
         self.trajectory_states.append(state_tensor)
@@ -1256,7 +1256,7 @@ class POMO_Agent:
             # Log-probs des actions choisies
             selected_log_probs = log_probs[torch.arange(log_probs.size(0), device=self.device), actions]
 
-            # Avantage normalisé par trajectoire
+            # Avantage normalisé
             advantage = rewards - rewards.mean()
             advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
@@ -1276,3 +1276,4 @@ class POMO_Agent:
             return loss.item()
 
         return 0.0
+

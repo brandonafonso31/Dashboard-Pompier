@@ -626,12 +626,12 @@ if __name__ == "__main__":
 
         # Sauvegarde de l'évolution des rewards
         os.chdir('../Plots')
-        pickle.dump(reward_evo, open(args.model_name + "_reward_evo.pkl", "wb"))
+        np.save(args.model_name + "_reward_evo.npy", np.array(reward_evo))
         print("Reward evolution saved")
 
     else:
         os.chdir('../Plots')
         pickle.dump(dic_indic, open(args.save_metrics_as + ".pkl", "wb"))
-        pickle.dump(reward_evo, open(args.model_name + "_reward_evo.pkl", "wb"))
+        np.save(args.model_name + "_reward_evo.npy", np.array(reward_evo))
         print("Metrics and reward evolution saved")
 
