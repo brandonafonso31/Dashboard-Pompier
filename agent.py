@@ -1216,17 +1216,27 @@ class POMO_Agent:
         return best_action, skill_lvl
 
 
-    def step(self, state, action, reward, next_state, done=None):
-        """Stocke la transition et entraîne si batch complet."""
-        # Convert to tensor [1, N, F]
+    def step(self, state, action, rewards, next_state, done=None):
+        """
+        Stocke la transition et entraîne si batch complet.
+        
+        - state : [N, F]
+        - action : int (même action appliquée aux trajectoires)
+        - rewards : liste ou vecteur [pomo_size] (une métrique par trajectoire)
+        """
+
+        # Convertir l'état en tenseur [1, N, F] puis répéter pour les trajectoires
         state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device)
         if state_tensor.ndim == 2:  # [N, F]
             state_tensor = state_tensor.unsqueeze(0)
         state_tensor = state_tensor.expand(self.pomo_size, -1, -1)  # [pomo_size, N, F]
 
-        # Actions & rewards
+        # Actions (même pour toutes les trajectoires)
         action_tensor = torch.full((self.pomo_size,), int(action), dtype=torch.long, device=self.device)
-        reward_tensor = torch.full((self.pomo_size,), float(reward), dtype=torch.float32, device=self.device)
+
+        # Rewards (un par trajectoire, ex: [r_metric1, r_metric2, r_metric3])
+        best_reward = max(rewards)
+        reward_tensor = torch.as_tensor(best_reward, dtype=torch.float32, device=self.device)
 
         # Stockage
         self.trajectory_states.append(state_tensor)
@@ -1235,20 +1245,22 @@ class POMO_Agent:
 
         # Update si batch complet
         if len(self.trajectory_states) >= self.batch_size // self.pomo_size:
-            states = torch.cat(self.trajectory_states, dim=0)  # [batch_size, N, F]
-            actions = torch.cat(self.trajectory_actions, dim=0)  # [batch_size]
-            rewards = torch.cat(self.trajectory_rewards, dim=0)  # [batch_size]
+            # Concaténer
+            states = torch.cat(self.trajectory_states, dim=0)      # [batch_size, N, F]
+            actions = torch.cat(self.trajectory_actions, dim=0)    # [batch_size]
+            rewards = torch.cat(self.trajectory_rewards, dim=0)    # [batch_size]
 
             logits = self.qnetwork_local(states)  # [batch_size, action_size]
-            log_probs = torch.log_softmax(logits, dim=-1)  # [batch_size, action_size]
+            log_probs = torch.log_softmax(logits, dim=-1)          # [batch_size, action_size]
 
+            # Log-probs des actions choisies
             selected_log_probs = log_probs[torch.arange(log_probs.size(0), device=self.device), actions]
 
-            # Advantage
+            # Avantage normalisé par trajectoire
             advantage = rewards - rewards.mean()
             advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
 
-            # Loss
+            # Loss = policy gradient
             loss = -(selected_log_probs * advantage).mean()
 
             self.optimizer.zero_grad()
@@ -1264,4 +1276,3 @@ class POMO_Agent:
             return loss.item()
 
         return 0.0
-

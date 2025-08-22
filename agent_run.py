@@ -28,7 +28,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, help="Model name")
     parser.add_argument("--start", type=int, default=1, help="start from num_inter")
     parser.add_argument("--end", type=int, default=159264, help="end after num_inter")
-    parser.add_argument("--reward_weights", type=str, help="JSON file with reward weights")
+    parser.add_argument("--reward_weights", type=str, nargs="+", help="JSON file with reward weights")
     parser.add_argument("--save_metrics_as", type=str, default="dic_indic_agent", help="save metrics as")
     parser.add_argument("--constraint_factor_veh", type=int, default=1, help="size of available vehicles in Z1. factor 1 is 100%, factor 3 is 33%")
     parser.add_argument("--constraint_factor_ff", type=int, default=1, help="size of available firefighters. factor 1 is 100%, factor 3 is 33%")
@@ -72,8 +72,9 @@ if __name__ == "__main__":
         print("Eval mode - weights loaded", flush=True)  
 
     os.chdir('../Reward_weights')
-
-    dic_tarif = json.load(open(args.reward_weights))
+    print(os.getcwd())
+    dic_tarif = [json.load(open(f)) for f in args.reward_weights]
+    
     print("Reward weights", dic_tarif)
 
     os.chdir('../')
@@ -532,7 +533,7 @@ if __name__ == "__main__":
                                                               day_cos, hour_sin, hour_cos, info_avail, max_duration, action_size)
     
                                             if compute and args.train:
-                                                l0 = agent.step(old_state, action, reward, state, inter_done)
+                                                l0 = agent.step(old_state, action, rewards, state, inter_done)
                                                 if l0 is not None:
                                                     loss = l0
                                             else:
@@ -551,12 +552,15 @@ if __name__ == "__main__":
                                                             skill_lvl, station_lvl)
 
                                             # REWARD
-
-                                            reward = compute_reward(dic_indic, dic_indic_old, num_d, dic_tarif)
-                                            dic_indic_old = dic_indic.copy()                                            
-                                            score += reward
+                                            rewards = []
+                                            for dic_t in dic_tarif: 
+                                                r = compute_reward(dic_indic, dic_indic_old, num_d, dic_t)
+                                                rewards.append(r)
+                                            dic_indic_old = dic_indic.copy() 
+                                            best_reward = max(rewards)                                           
+                                            score += best_reward
                                             action_num += 1
-                                            reward_evo.append([action_num, reward])
+                                            reward_evo.append([action_num, best_reward])
                                             
                                             old_state = state
                                             compute = True
@@ -569,7 +573,7 @@ if __name__ == "__main__":
         if num_inter % 100 == 0 and required_departure == {0:"RETURN"}:
             rwd_mean = np.mean([row[1] for row in reward_evo[-100:]])
             lr = agent.optimizer.param_groups[0]['lr']
-            
+
             print(f"{num_inter} v_out: {vehicle_out} | rwd_mean: {rwd_mean:.2f} | v1notfroms1: {dic_indic['v1_not_sent_from_s1']} | v3notfroms3: {dic_indic['v3_not_sent_from_s3']} | v_not_found_ls: {dic_indic['v_not_found_in_last_station']} | deg: {dic_indic['v_degraded']}", flush=True)
             print(f"{num_inter} z1_VSAV_sent: {dic_indic['z1_VSAV_sent']} | z1_FPT_sent: {dic_indic['z1_FPT_sent']} | z1_EPA_sent: {dic_indic['z1_EPA_sent']} | VSAV_disp: {VSAV_disp} | FPT_disp: {FPT_disp} | EPA_disp: {EPA_disp} |", flush=True)
 
