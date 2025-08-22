@@ -1,1 +1,15 @@
-{"0": "v_degraded", "1": "v1_not_sent_from_s1", "2": "v3_not_sent_from_s3", "3": "v_not_found_in_last_station", "4": "z1_VSAV_sent", "5": "rupture_ff"}
+{
+    "0": "v_required",
+    "1": "v_sent",
+    "2": "v_sent_full",
+    "3": "v_degraded",
+    "4": "cancelled",
+    "5": "function_not_found",
+    "6": "v1_not_sent_from_s1",
+    "7": "v3_not_sent_from_s3",
+    "8": "v_not_found_in_last_station",
+    "9": "ff_required",
+    "10": "ff_sent",
+    "11": "rupture_ff",
+    "12": "skill_lvl"
+}
